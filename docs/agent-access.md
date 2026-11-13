@@ -13,6 +13,8 @@ Until the toggle is on, Imnota starts no listener and a `--mcp` process exits im
 
 The HTTP listener binds only to `http://127.0.0.1:17384/mcp`. It is not a public server. The existing interface has no authentication token: enabling it allows local processes to read the selected workspace. Requests with a foreign Host or a browser Origin are rejected; no CORS permission is granted. Hosted-share tokens do not authorize MCP access.
 
+HTTP responses disable caching. Accepted notifications return an empty `202`; unsupported methods return `405` with `Allow: POST`, and oversized bodies return `413`. The server closes refused connections; a client still uploading after an early size refusal can observe a connection reset instead of exposing that response. Malformed JSON or UTF-8 returns a JSON-RPC parse error. Stdio also rejects malformed UTF-8, bounds unfinished request lines, recovers after an oversized line, and waits for response writes before consuming another request. Tool discovery marks tools as read-only, idempotent and local; annotations are hints, not additional access rights. Client `_meta` on tool calls is accepted separately from tool arguments.
+
 Enabling access first checks that the listener can bind. If the port is occupied, Settings reports the failure and leaves access off. A failed settings write closes a newly started listener. If a later app launch cannot bind, Imnota disables access and explains how to retry. Disabling access stops the listener and rejects further requests.
 
 ## What agents can read
@@ -24,6 +26,7 @@ Enabling access first checks that the listener can bind. If the port is occupied
 | `list_collection_items` | `projectPath`, `collectionId`          | Ordered items (id, kind, title, includeInExport, priority)                       |
 | `get_latest_bundle`     | Optional `projectPath`, `collectionId` | Latest readable saved export: Markdown text and PNG image blocks                 |
 | `get_bundle`            | `id`                                   | One saved export identified by a discovered bundle id                            |
+| `inspect_bundle`        | `id`                                   | Ordered saved file sizes and read limits, without reading Markdown or PNG bodies |
 | `get_item`              | `projectPath`, `itemId`                | One item's Markdown plus image path for screenshots and drawings                 |
 | `search_saved_text`     | `query`, optional search filters       | Existing saved-text search results                                               |
 
@@ -34,6 +37,8 @@ Bundle tools read folders matching the export layout used by **Copy Bundle**; th
 "Latest" is derived from export folder names, not an independent publication record. Anyone able to write into the workspace can influence which bundle is reported as latest; they could equally edit the bundle contents. Copy Bundle removes its temporary ownership record when publishing and leaves no reliable ordering record. Names more than **five minutes** ahead of the current clock are ignored. This small allowance covers clock corrections and ordinary one-second timestamp reservations, without accepting tomorrow's fabricated export. Parsing uses the machine's current local timezone, matching Copy Bundle's local-time name generation, rather than treating the name as UTC. After a timezone change, a clock correction larger than five minutes, or an unusually long run of occupied timestamp reservations, a genuine set may be temporarily omitted. Timezone/DST ambiguity cannot be recovered from these names.
 
 Use the opaque `id` returned by `list_collections` or `get_latest_bundle` for `get_bundle`. IDs remain stable while the workspace-relative project folder, collection id and export folder name stay the same. Moving or removing a set, changing the selected workspace, or making it inaccessible can return `bundle not found`. An id is never treated as a filesystem path.
+
+Use `inspect_bundle` with a discovered id to check a saved export before retrieving its content. It returns ordered Markdown/image byte counts, per-call read limits and a `get_bundle` next action. Each existing file is `not-read`; unavailable metadata is explicit, and a missing image is `null`. It reads project metadata and scans export filenames, but opens no export payloads and returns no Markdown bodies or image blocks. File sizes can change before the later read. `sourceKind` is `saved-export`, freshness is `unknown`, and content integrity and redaction are unverified. `preparedAtBasis: filename-local-time` makes the existing timestamp's limits explicit; this is not a publication manifest or a content revision. Existing bundle reads and current-item reads are unchanged.
 
 The first MCP content block is JSON text with bundle metadata and ordered `bundles` entries. PNG image blocks follow in that same order for entries whose `image` is `included`. Each entry carries its saved `markdownPath`, optional `pngPath`, Markdown text and image status. Text-only exports are supported. PNG signature, chunk integrity and dimension checks reject invalid images.
 

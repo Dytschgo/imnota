@@ -15,6 +15,12 @@ import {
   Tray,
 } from 'electron';
 import { nativeClipboard } from './native-clipboard.js';
+import {
+  assertClipboardText,
+  clipboardImage,
+  nativeClipboardOwnerHandle,
+  validateDecodedPromptPng,
+} from './clipboard-input.js';
 import { PersistenceDiagnostics, tracesPersistenceChannel } from './persistence-diagnostics.js';
 import { inspectProjectFiles } from './project-integrity.js';
 import { captureTrayTemplate } from './app-tray.js';
@@ -28,7 +34,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import updater from 'electron-updater';
 const { autoUpdater } = updater;
@@ -47,10 +53,17 @@ import type {
   ProjectWatchEvent,
   WindowsCopyVariantId,
 } from '../src/shared/workflow-bridge.js';
-import { DEFAULT_EXPORT_PREFERENCES, nowIso, sanitizeFilename, slugify } from '../src/shared/utils.js';
+import {
+  DEFAULT_EXPORT_PREFERENCES,
+  nowIso,
+  portableFilename,
+  sanitizeFilename,
+  slugify,
+} from '../src/shared/utils.js';
 import { validateProject, parseProjectFile, annotationSchema, notesSchema } from '../src/shared/schema.js';
-import { assertNoLinks, CommittedWriteError, isWithin } from './files.js';
-import { persistSettings, writeApplicationFile } from './application-persistence.js';
+import { assertNoLinks, CommittedWriteError, isWithin, type CaptureWrittenFileIdentity } from './files.js';
+import { persistSettings, trashApplicationFile, writeApplicationFile } from './application-persistence.js';
+import { preventForeignNavigation } from './window-navigation.js';
 import { ThumbnailCache, thumbnailSize } from './thumbnail-cache.js';
 import { ensureCollection, migrateProjectWithBackup, screenshotPath } from './collections.js';
 import { recoverScreenshotTrashTransactions, type ScreenshotTrashOperations } from './screenshot-trash.js';
@@ -69,17 +82,23 @@ import {
   prepareRecoveryRestoreTransaction,
 } from './screenshot-transaction-adapter.js';
 import { normalizeRecoveredProject } from './recovery.js';
-import { clipboardContextHtml, clipboardPngDimensions } from '../src/shared/clipboard-context.js';
+import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
 import { UpdateController, UpdateFailure } from './update-controller.js';
 import { discoverRelease, type ReleaseCandidate } from './releases.js';
 import { prepareNativeUpdate } from './native-update.js';
 import { terminalUpdateArguments } from './terminal-update.js';
 import { startMacUpdate, type MacUpdateSession } from './macos-update.js';
-import { PromptBundleWorkflow } from './prompt-bundle-workflow.js';
+import { promptCollectionGrant, PromptBundleWorkflow } from './prompt-bundle-workflow.js';
 import { HostedShareClient } from './hosted-share-client.js';
-import { PromptBundleStore, type PromptBundleManifestItem } from './prompt-bundle-store.js';
+import { PromptBundleStore } from './prompt-bundle-store.js';
 import { type OcrCropRect } from './windows-ocr.js';
-import { ProjectWatchManager, projectRevisionForSource } from './project-watch.js';
+import {
+  validateFaultLaunch,
+  validateFaultProfileBootstrap,
+  bindFaultFixture,
+} from './smoke-fault-ownership.js';
+import { OwnedSmokeFaultController } from './smoke-fault-controller.js';
+import { ProjectWatchManager, createRealProjectWatch, projectRevisionForSource } from './project-watch.js';
 import { workflowOutcome } from './workflow-errors.js';
 import { IpcRouter } from './ipc-router.js';
 import { registerCaptureIpc } from './ipc-capture.js';
@@ -89,6 +108,7 @@ import { registerPromptExportIpc } from './ipc-prompt-export.js';
 import { registerPreferenceIpc } from './ipc-preferences.js';
 import { registerSystemIpc } from './ipc-system.js';
 import { registerContentIpc } from './ipc-content.js';
+import { importScreenshot } from './screenshot-import.js';
 import { registerScreenshotIpc } from './ipc-screenshots.js';
 import { registerProjectIpc } from './ipc-projects.js';
 import { registerSettingsIpc } from './ipc-settings.js';
@@ -153,6 +173,7 @@ import { assertCaptureCommitAdmission, readWithCaptureAdmission } from './captur
 import { syntheticCaptureColor } from './capture-smoke-contract.js';
 import { mcpVerificationProfile } from './mcp-verification-profile.js';
 import { requiresSingleInstanceLock } from './single-instance.js';
+import { AGENT_ACCESS_OFF_MESSAGE, AGENT_ACCESS_PORT_IN_USE_MESSAGE } from './agent-access-messages.js';
 import type { DamagedJournalReport } from './journal-quarantine.js';
 import type { IpcMainInvokeEvent } from 'electron';
 
@@ -172,6 +193,12 @@ try {
   process.stderr.write('Invalid owned MCP verification profile.\n');
   process.exit(1);
 }
+try {
+  validateFaultProfileBootstrap(process.env, app.getPath('temp'));
+} catch (error) {
+  process.stderr.write(`Invalid owned fault verification profile: ${String(error)}\n`);
+  process.exit(1);
+}
 
 // Smoke never reads or writes the installed application's profile or caches.
 if (process.env.IMNOTA_SMOKE === '1') {
@@ -182,6 +209,20 @@ if (process.env.IMNOTA_SMOKE === '1') {
   app.setPath('sessionData', profile);
   nativeTheme.themeSource = 'light';
 }
+
+const faultLaunch = await validateFaultLaunch({
+  env: process.env,
+  temporaryRoot: app.getPath('temp'),
+  executable: process.execPath,
+  asar: path.join(process.resourcesPath, 'app.asar'),
+  version: app.getVersion(),
+  packaged: app.isPackaged,
+}).catch((error: unknown) => {
+  // An owned verifier must fail at startup, not wait on Electron's error dialog.
+  process.stderr.write(`Invalid owned fault verification candidate: ${String(error)}\n`);
+  process.exit(1);
+});
+let smokeFaultController: OwnedSmokeFaultController | undefined;
 
 // The lock is scoped to the profile selected above. A second interactive launch hands
 // over to the running instance instead of writing to the same projects beside it.
@@ -329,15 +370,25 @@ function resolvedWindowBackground(
   return theme === 'light' ? '#eceef2' : '#0b0d12';
 }
 
-async function atomicWrite(filePath: string, content: string | Uint8Array): Promise<void> {
-  await writeApplicationFile(filePath, content, {
-    diagnostics,
-    recordSelfWrite: (target, source) => projectWatchManager?.recordSelfWrite(target, source),
-    invalidate: (target) => {
-      projectSearchService?.invalidateForPath(target);
-      contentSearch.invalidatePath(target);
+async function atomicWrite(
+  filePath: string,
+  content: string | Uint8Array,
+  captureIdentity?: CaptureWrittenFileIdentity,
+): Promise<void> {
+  await writeApplicationFile(
+    filePath,
+    content,
+    {
+      diagnostics,
+      verification: smokeFaultController?.atomicVerification(filePath),
+      recordSelfWrite: (target, source) => projectWatchManager?.recordSelfWrite(target, source),
+      invalidate: (target) => {
+        projectSearchService?.invalidateForPath(target);
+        contentSearch.invalidatePath(target);
+      },
     },
-  });
+    captureIdentity,
+  );
 }
 
 async function copyFile(filePath: string, targetPath: string): Promise<void> {
@@ -813,7 +864,7 @@ async function openWithRecovery(projectPath: string, forcedChoice?: 'restore'): 
 }
 
 async function uniqueProjectFolder(workspace: string, name: string): Promise<string> {
-  const base = slugify(name);
+  const base = portableFilename(slugify(name));
   let folder = path.join(workspace, base);
   let n = 2;
   while (existsSync(folder)) folder = path.join(workspace, `${base}-${n++}`);
@@ -837,18 +888,23 @@ async function withinProjectCreationQueue<T>(operation: () => Promise<T>): Promi
 
 async function uniqueStoredName(projectPath: string, original: string): Promise<string> {
   const ext = path.extname(original).toLowerCase() || '.png';
-  const base = sanitizeFilename(path.basename(original, ext), 'screenshot');
+  const base = sanitizeFilename(portableFilename(path.basename(original, ext)), 'screenshot');
   const project = await readProject(projectPath);
   const existing = new Set(project.screenshots.map((s) => s.storedFilename));
   const occupied = (candidate: string) =>
     existing.has(candidate) ||
-    project.collections.some((collection) =>
-      existsSync(path.join(projectPath, 'collections', collection.id, 'screenshots', candidate)),
+    project.collections.some(
+      (collection) =>
+        existsSync(path.join(projectPath, 'collections', collection.id, 'screenshots', candidate)) ||
+        existsSync(
+          path.join(projectPath, 'collections', collection.id, 'annotations', `${candidate}.json`),
+        ) ||
+        existsSync(path.join(projectPath, 'collections', collection.id, 'descriptions', `${candidate}.md`)),
     );
-  let candidate = `${String(existing.size + 1).padStart(3, '0')}-${base}${ext}`;
+  let candidate = portableFilename(`${String(existing.size + 1).padStart(3, '0')}-${base}${ext}`);
   let n = 2;
   while (occupied(candidate))
-    candidate = `${String(existing.size + 1).padStart(3, '0')}-${base}-${n++}${ext}`;
+    candidate = portableFilename(`${String(existing.size + 1).padStart(3, '0')}-${base}-${n++}${ext}`);
   return candidate;
 }
 
@@ -907,46 +963,13 @@ async function importOne(
   originalFilename = path.basename(sourcePath),
   collectionId?: string,
 ): Promise<void> {
-  const ext = path.extname(originalFilename).toLowerCase();
-  if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext))
-    throw new Error(`Unsupported screenshot format: ${originalFilename}. Use PNG, JPEG or WebP.`);
-  const image = nativeImage.createFromPath(sourcePath);
-  if (image.isEmpty()) throw new Error(`Imnota could not read ${originalFilename}. The file may be damaged.`);
-  const project = await readProject(projectPath);
-  const collection = project.collections.find(
-    (item) => item.id === (collectionId ?? project.collections.find((candidate) => !candidate.archived)?.id),
-  );
-  if (!collection) throw new Error('Choose a collection before importing.');
-  await ensureCollection(projectPath, collection.id);
-  const storedFilename = await uniqueStoredName(projectPath, originalFilename);
-  await atomicWrite(
-    path.join(projectPath, 'collections', collection.id, 'screenshots', storedFilename),
-    await fs.readFile(sourcePath),
-  );
-  const timestamp = nowIso();
-  project.screenshots.push({
-    collectionId: collection.id,
-    id: `shot_${crypto.randomUUID()}`,
+  await importScreenshot(
+    { atomicWrite, readProject, uniqueStoredName, nextScreenshotPosition },
+    projectPath,
+    sourcePath,
     originalFilename,
-    storedFilename,
-    title: originalFilename,
-    description: '',
-    position: nextScreenshotPosition(project, collection.id),
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    priority: 'medium',
-    annotationFile: `collections/${collection.id}/annotations/${storedFilename}.json`,
-    descriptionFile: `collections/${collection.id}/descriptions/${storedFilename}.md`,
-    originalWidth: image.getSize().width,
-    originalHeight: image.getSize().height,
-    includeInExport: true,
-  });
-  const added = project.screenshots.at(-1)!;
-  await atomicWrite(path.join(projectPath, added.annotationFile), '[]');
-  await atomicWrite(path.join(projectPath, added.descriptionFile), '');
-  project.updatedAt = timestamp;
-  collection.archived = false;
-  await atomicWrite(path.join(projectPath, 'project.json'), JSON.stringify(project, null, 2));
+    collectionId,
+  );
 }
 
 async function loadImage(projectPath: string, screenshot: ScreenshotRecord): Promise<ImagePayload> {
@@ -965,8 +988,7 @@ async function loadImage(projectPath: string, screenshot: ScreenshotRecord): Pro
 }
 
 async function copyTextToClipboard(text: string): Promise<void> {
-  if (typeof text !== 'string' || text.length > 2_000_000)
-    throw new Error('Context is too large to copy. Export the Markdown file instead.');
+  assertClipboardText(text);
   await nativeClipboard.writeText(text);
 }
 
@@ -978,33 +1000,13 @@ function cropPngForOcr(png: Uint8Array, crop: OcrCropRect): Uint8Array {
   return cropped.toPNG();
 }
 
-function clipboardImage(imageDataUrl: string) {
-  const size = clipboardPngDimensions(imageDataUrl);
-  const image = nativeImage.createFromDataURL(imageDataUrl);
-  if (image.isEmpty() || image.getSize().width !== size.width || image.getSize().height !== size.height)
-    throw new Error('The annotated image could not be decoded. Use the exported PNG instead.');
-  return image;
-}
-
-function validateDecodedPromptPng(
-  png: Uint8Array,
-  expected: Pick<PromptBundleManifestItem, 'width' | 'height'>,
-): void {
-  const image = nativeImage.createFromBuffer(Buffer.from(png.buffer, png.byteOffset, png.byteLength));
-  const size = image.getSize();
-  if (image.isEmpty() || size.width !== expected.width || size.height !== expected.height)
-    throw new Error('Prompt PNG could not be fully decoded at its reserved dimensions.');
-}
-
 async function copyImageToClipboard(imageDataUrl: string): Promise<void> {
   await nativeClipboard.writeImage(clipboardImage(imageDataUrl));
 }
 
 function clipboardOwnerHandle(): Buffer {
   const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
-  if (!owner || owner.isDestroyed())
-    throw new Error('A live Imnota window is required for clipboard access.');
-  return owner.getNativeWindowHandle();
+  return nativeClipboardOwnerHandle(owner);
 }
 
 async function copyBundleToClipboard(
@@ -1557,6 +1559,8 @@ export type CaptureWorkflowRegistrar = ReturnType<typeof captureWorkflowRegistra
 /** Main-process state and helpers shared with the domain IPC modules. */
 function createIpcHost() {
   return {
+    restoreVerificationReadHooks: (projectPath: string) =>
+      smokeFaultController?.confirmationReadHooks(projectPath),
     assertLiveCaptureAdmission,
     assertProjectPath,
     assertProjectRevision,
@@ -1895,12 +1899,40 @@ function registerIpc(): void {
     defaultContract: z.tuple([pathInput]),
     tracesChannel: tracesPersistenceChannel,
     trace: (channel, run) => diagnostics.run(channel, run),
+    ...(faultLaunch
+      ? {
+          verificationInvocation: <T>(channel: string, args: unknown[], actual: () => T | Promise<T>) =>
+            smokeFaultController
+              ? smokeFaultController.invoke(channel, args, actual)
+              : Promise.resolve().then(actual),
+        }
+      : {}),
   });
+  if (faultLaunch)
+    ipcMain.on('smoke:fault-observation', (event, value: unknown) => {
+      if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) return;
+      smokeFaultController?.receive(value);
+    });
   const host = createIpcHost();
   const handleCaptureWorkflow = captureWorkflowRegistrar(router);
   registerCaptureIpc(router, handleCaptureWorkflow, host);
 
   projectWatchManager = new ProjectWatchManager({
+    ...(faultLaunch
+      ? {
+          createWatch: (
+            projectPath: string,
+            listener: (event: string, filename: string | Buffer | null) => void,
+          ) => {
+            const handle = createRealProjectWatch(projectPath, listener);
+            return smokeFaultController?.wrapRealWatch(projectPath, handle) ?? handle;
+          },
+          readProjectSource: (projectPath: string) => {
+            const read = () => fs.readFile(path.join(projectPath, 'project.json'), 'utf8');
+            return smokeFaultController?.readProjectSource(projectPath, read) ?? read();
+          },
+        }
+      : {}),
     loadSnapshot: (projectPath) => makeSnapshot(projectPath),
     saveProject: async (projectPath, project) => {
       const current = await readProject(projectPath);
@@ -1914,6 +1946,7 @@ function registerIpc(): void {
       return makeSnapshot(projectPath);
     },
     emit: (event: ProjectWatchEvent) => {
+      smokeFaultController?.observeWatch(event);
       void diagnostics.record({
         category: 'integrity',
         action: event.kind,
@@ -1944,12 +1977,15 @@ function registerIpc(): void {
     },
     transactionOperations: screenshotTransactionOperations,
     trashOperations: contentTrashOperations,
+    restoreVerificationReadHooks: (projectPath) => smokeFaultController?.confirmationReadHooks(projectPath),
     ownsRestoreRevision: (projectPath, revision) =>
       projectWatchManager?.hasSelfProjectRevision(projectPath, revision) ?? false,
-    trashItem: async (target) => {
-      await diagnostics.filesystem('trash', target, () => shell.trashItem(target));
-      projectWatchManager?.recordSelfDelete(target);
-    },
+    trashItem: (target) =>
+      trashApplicationFile(target, {
+        diagnostics,
+        trash: (file) => shell.trashItem(file),
+        recordSelfDelete: (file) => projectWatchManager?.recordSelfDelete(file),
+      }),
     validatePng: (png, expected) => {
       const image = nativeImage.createFromBuffer(Buffer.from(png));
       const actual = image.getSize();
@@ -1967,13 +2003,7 @@ function registerIpc(): void {
       authorize: async (projectPath, collectionId) => {
         const safePath = await assertProjectPath(projectPath);
         const project = await readProjectMetadata(safePath);
-        const collection = project.collections.find((candidate) => candidate.id === collectionId);
-        if (!collection) throw new Error('Collection does not belong to this project.');
-        return {
-          projectPath: safePath,
-          collectionId: collection.id,
-          collectionName: collection.name,
-        };
+        return promptCollectionGrant(safePath, collectionId, project.collections);
       },
       copyContext: (markdown, imageDataUrl, filePaths, variant) =>
         copyBundleToClipboard(markdown, imageDataUrl, filePaths, variant),
@@ -2131,6 +2161,9 @@ async function createWindow(): Promise<BrowserWindow> {
     ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 14, y: 18 } } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
+      ...(smokeFaultController
+        ? { additionalArguments: [`--imnota-native-fault=${smokeFaultController.proof.nonce}`] }
+        : {}),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -2139,6 +2172,7 @@ async function createWindow(): Promise<BrowserWindow> {
     },
   });
   const createdWindow = mainWindow;
+  smokeFaultController?.setWindow(createdWindow);
   const createdWebContents = createdWindow.webContents;
   createdWindow.on('closed', () => {
     if (mainWindow === createdWindow) mainWindow = null;
@@ -2149,11 +2183,13 @@ async function createWindow(): Promise<BrowserWindow> {
     if (url.startsWith('https://')) void shell.openExternal(url);
     return { action: 'deny' };
   });
-  createdWindow.webContents.on('will-navigate', (event) => event.preventDefault());
   const devUrl = process.env.VITE_DEV_SERVER_URL;
+  const appEntry = path.join(__dirname, '../../dist/index.html');
+  const trustedAppUrl = devUrl ? new URL(devUrl).href : pathToFileURL(appEntry).href;
+  createdWindow.webContents.on('will-navigate', (event) => preventForeignNavigation(event, trustedAppUrl));
   try {
     if (devUrl) await createdWindow.loadURL(devUrl);
-    else await createdWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
+    else await createdWindow.loadFile(appEntry);
   } catch (error) {
     if (!createdWindow.isDestroyed()) throw error;
   }
@@ -2243,7 +2279,7 @@ app.whenReady().then(async () => {
       );
     }
     if (!started) {
-      process.stderr.write('Local agent access is off. Enable it in Settings → Workspace.\n');
+      process.stderr.write(`${AGENT_ACCESS_OFF_MESSAGE}\n`);
       app.exit(1);
       return;
     }
@@ -2256,8 +2292,7 @@ app.whenReady().then(async () => {
   let agentAccessStartupError = '';
   if (process.env.IMNOTA_SMOKE !== '1')
     await localMcpServer.sync().catch(async () => {
-      agentAccessStartupError =
-        'Local agent access could not start. Port 17384 may be in use. Access is off; free the port and enable it again in Settings → Workspace.';
+      agentAccessStartupError = AGENT_ACCESS_PORT_IN_USE_MESSAGE;
       const next = { ...preferenceSettingsResult.settings, agentAccess: { enabled: false } };
       // Fail closed for this process even if storing the disabled preference also fails.
       preferenceSettingsResult = { ...preferenceSettingsResult, settings: next };
@@ -2277,6 +2312,23 @@ app.whenReady().then(async () => {
     const { runSmokeSession } = await import('./smoke-session.js');
     const exitCode = await runSmokeSession({
       mainWindow: () => mainWindow,
+      async prepareFaults(fixture, temporary) {
+        if (!faultLaunch) throw new Error('Fault session has no validated launcher proof.');
+        await bindFaultFixture(faultLaunch, fixture, temporary);
+        await fs.writeFile(
+          path.join(faultLaunch.runRoot, 'fault-session.json'),
+          JSON.stringify({
+            nonce: faultLaunch.nonce,
+            fixture,
+            profile: faultLaunch.profileRoot,
+            pid: process.pid,
+            executable: process.execPath,
+          }),
+          { flag: 'wx' },
+        );
+        smokeFaultController = new OwnedSmokeFaultController(faultLaunch, fixture);
+        return smokeFaultController;
+      },
       captureCapability: smokeDesktopCaptureCapability,
       diagnosticsHealth: () => diagnostics.health(),
       setWorkspace(workspacePath) {

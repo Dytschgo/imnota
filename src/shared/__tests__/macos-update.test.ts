@@ -9,14 +9,31 @@ import { UpdateFailure } from '../../../electron/update-controller.js';
 
 const spawned = vi.hoisted(() => ({
   calls: [] as Array<{ command: string; args: string[]; child: unknown }>,
+  exitImmediately: false,
+  realSpawn: false,
 }));
 vi.mock('node:child_process', async (importOriginal) => {
   const { EventEmitter: Emitter } = await import('node:events');
+  const original = await importOriginal<typeof import('node:child_process')>();
   return {
-    ...(await importOriginal<typeof import('node:child_process')>()),
-    spawn: vi.fn((command: string, args: string[]) => {
-      const child = Object.assign(new Emitter(), { exitCode: null, unref: vi.fn(), kill: vi.fn(() => true) });
+    ...original,
+    spawn: vi.fn((command: string, args: string[], options: import('node:child_process').SpawnOptions) => {
+      if (spawned.realSpawn) {
+        const child = original.spawn(command, args, options);
+        spawned.calls.push({ command, args, child });
+        return child;
+      }
+      const child = Object.assign(new Emitter(), {
+        exitCode: null as number | null,
+        unref: vi.fn(),
+        kill: vi.fn(() => true),
+      });
       spawned.calls.push({ command, args, child });
+      if (spawned.exitImmediately)
+        queueMicrotask(() => {
+          child.exitCode = 1;
+          child.emit('exit', 1);
+        });
       return child;
     }),
   };
@@ -138,6 +155,102 @@ describe('in-app macOS updates', () => {
       await fs.rm(cache, { recursive: true, force: true });
     }
   });
+
+  it('observes an immediate helper exit before asynchronous parent log cleanup', async () => {
+    const cache = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-mac-update-test-'));
+    const helperPath = path.join(cache, 'bundled-update-macos.sh');
+    await fs.writeFile(helperPath, '#!/bin/bash\n');
+    let started: MacUpdateSession | undefined;
+    try {
+      spawned.exitImmediately = true;
+      started = await startMacUpdate(
+        release,
+        {
+          appPath: '/Applications/Imnota.app',
+          appPid: 4321,
+          helperPath,
+          cachePath: cache,
+          currentVersion: '0.4.0',
+        },
+        { progress: vi.fn(), failed: vi.fn() },
+        5,
+      );
+      const rejected = expect(started.ready).rejects.toThrow(/helper stopped/);
+      await vi.waitFor(() => expect(started!.finished).toBe(true));
+      await rejected;
+      await vi.waitFor(async () => expect(await fs.readdir(cache)).toEqual(['bundled-update-macos.sh']));
+    } finally {
+      spawned.exitImmediately = false;
+      // Allow a broken listener installation to clean its owned fixture after the assertion fails.
+      (spawned.calls.at(-1)?.child as EventEmitter | undefined)?.emit('exit', 1);
+      await started?.ready.catch(() => undefined);
+      await vi.waitFor(async () => expect(await fs.readdir(cache)).toEqual(['bundled-update-macos.sh']));
+      await fs.rm(cache, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform !== 'darwin')(
+    'signals the real waiting Bash helper and removes its cache after exit',
+    async () => {
+      const spawnIndex = spawned.calls.length;
+      const cache = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-mac-update-test-'));
+      const helperPath = path.join(cache, 'bundled-update-macos.sh');
+      const production = path.join(cache, 'production-update-macos.sh');
+      const installed = path.join(cache, 'requested');
+      await fs.copyFile('scripts/update-macos.sh', production);
+      // Only the waiting phase is invoked here; the packaged archive transaction is tested separately.
+      await fs.writeFile(
+        helperPath,
+        `#!/bin/bash
+set -euo pipefail
+source '${production}'
+in_app=1
+app_pid=$2
+trap 'install_requested=1' USR1
+printf 'IMNOTA_UPDATE archive\\nIMNOTA_UPDATE ready\\n'
+wait_for_install_request
+printf requested > '${installed}'
+`,
+      );
+      try {
+        spawned.realSpawn = true;
+        const events = { progress: vi.fn(), failed: vi.fn() };
+        const started = await startMacUpdate(
+          release,
+          {
+            appPath: '/Applications/Imnota.app',
+            appPid: process.pid,
+            helperPath,
+            cachePath: cache,
+            currentVersion: '0.4.0',
+          },
+          events,
+          5,
+        );
+        await started.ready;
+        expect(events.progress).toHaveBeenLastCalledWith(100);
+        await expect(fs.stat(installed)).rejects.toMatchObject({ code: 'ENOENT' });
+        started.install();
+        await vi.waitFor(() => expect(started.finished).toBe(true), { timeout: 5000 });
+        expect(await fs.readFile(installed, 'utf8')).toBe('requested');
+        expect(events.failed).not.toHaveBeenCalled();
+        await vi.waitFor(async () =>
+          expect((await fs.readdir(cache)).filter((name) => name.startsWith('imnota-update-'))).toEqual([]),
+        );
+      } finally {
+        spawned.realSpawn = false;
+        const child = spawned.calls[spawnIndex]?.child as
+          import('node:child_process').ChildProcess | undefined;
+        if (child && child.exitCode === null) {
+          const exited = new Promise((resolve) => child.once('exit', resolve));
+          child.kill('SIGTERM');
+          await exited;
+        }
+        await fs.rm(cache, { recursive: true, force: true });
+      }
+    },
+    10_000,
+  );
 
   it('refuses installation when the helper can no longer be signalled', async () => {
     const { instance } = session(vi.fn(() => false));

@@ -1,5 +1,7 @@
 import { clipboard, ClipboardItem, nativeImage, type NativeImage } from 'electron';
 import path from 'node:path';
+import { nativeClipboardFailure } from './clipboard-errors.js';
+import { clipboardFailure } from './workflow-errors.js';
 import type { ClipboardFormatsReport } from '../src/shared/workflow-bridge.js';
 import { macFilePair, writeMacClipboardFiles } from './mac-clipboard.js';
 import {
@@ -16,10 +18,13 @@ function windowsFilePair(filePaths: readonly string[]): readonly [string, string
     path.extname(filePaths[0]).toLowerCase() !== '.md' ||
     path.extname(filePaths[1]).toLowerCase() !== '.png'
   )
-    throw new Error('Windows file copy requires one Markdown file and one PNG file.');
+    throw clipboardFailure('rejected', 'Windows file copy requires one Markdown file and one PNG file.');
   const directories = new Set(filePaths.map((filePath) => path.dirname(path.resolve(filePath))));
   if (directories.size !== 1)
-    throw new Error('Windows file copy requires the generated pair to share one directory.');
+    throw clipboardFailure(
+      'rejected',
+      'Windows file copy requires the generated pair to share one directory.',
+    );
   return [path.resolve(filePaths[0]), path.resolve(filePaths[1])];
 }
 
@@ -32,6 +37,8 @@ async function serializeWrite<T>(operation: () => Promise<T>): Promise<T> {
   await previous;
   try {
     return await operation();
+  } catch (error) {
+    throw nativeClipboardFailure(error);
   } finally {
     release();
   }
@@ -140,7 +147,7 @@ export const nativeClipboard = {
    */
   async writeMacFiles(filePaths: readonly string[], withText = false): Promise<ClipboardFormatsReport> {
     if (process.platform !== 'darwin')
-      throw new Error('The macOS file clipboard is available only on macOS.');
+      throw clipboardFailure('rejected', 'The macOS file clipboard is available only on macOS.');
     const pair = macFilePair(filePaths);
     return serializeWrite(async () => {
       const kept = await writeMacClipboardFiles(pair, { withText });
@@ -164,7 +171,7 @@ export const nativeClipboard = {
     context?: { text: string; html: string; image: NativeImage },
   ): Promise<ClipboardFormatsReport> {
     if (process.platform !== 'win32')
-      throw new Error('The file clipboard comparison is available only on Windows.');
+      throw clipboardFailure('rejected', 'The file clipboard comparison is available only on Windows.');
     const pair = windowsFilePair(filePaths);
     return serializeWrite(async () => {
       await writeWindowsClipboard(owner, {

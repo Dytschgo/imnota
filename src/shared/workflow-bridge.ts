@@ -275,6 +275,7 @@ export interface WorkflowBridge {
     bundleNumber: number;
     target: PromptExportCopyTarget;
   }): Promise<WorkflowResult<PromptExportCopyResult>>;
+  copyPromptExportMarkdown(text: string): Promise<WorkflowResult<void>>;
   openPromptExportBundle(input: {
     sessionId: string;
     bundleNumber: number;

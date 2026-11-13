@@ -1,8 +1,9 @@
 import { COMMITTED_WRITE_WARNING } from '../src/shared/write-outcome.js';
 import fs from 'node:fs/promises';
-import { constants as fsConstants } from 'node:fs';
+import { constants as fsConstants, type BigIntStats } from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { NativeWorkflowError } from './workflow-errors.js';
 
 export function isWithin(parent: string, target: string): boolean {
   const relative = path.relative(path.resolve(parent), path.resolve(target));
@@ -21,7 +22,10 @@ export async function assertNoLinks(target: string): Promise<void> {
       throw error;
     });
     if (stat?.isSymbolicLink())
-      throw new Error('Linked workspace paths are not supported. Choose a regular folder.');
+      throw new NativeWorkflowError(
+        'linked-path',
+        'Linked workspace paths are not supported. Choose a regular folder.',
+      );
     const parent = path.dirname(current);
     if (parent === current) return;
     current = parent;
@@ -144,31 +148,121 @@ export async function afterFileCommit(
   if (warning) throw warning;
 }
 
-const writes = new Map<string, Promise<void>>();
-export async function atomicWrite(filePath: string, content: string | Uint8Array): Promise<void> {
+/** Optional per-invocation verification observers; callers supply no observers ordinarily.
+ * No environment flags, path selection, or fault policy belongs in this module.
+ */
+export interface AtomicWriteVerification {
+  beforeWrite?(target: string, source: string | Uint8Array): Promise<void>;
+  beforeCandidateSync?(target: string): Promise<void>;
+  beforeParentSync?(
+    target: string,
+    directory: string,
+    boundary: 'posix-directory-handle' | 'windows-directory-sync-unsupported',
+  ): Promise<void>;
+}
+
+export interface WrittenFileIdentity {
+  readonly dev: bigint;
+  readonly ino: bigint;
+  readonly size: bigint;
+  readonly mtimeNs: bigint;
+  readonly ctimeNs: bigint;
+}
+
+export interface WrittenFileEvidence extends WrittenFileIdentity {
+  readonly sha256: string;
+}
+
+export type CaptureWrittenFileIdentity = (identity: WrittenFileEvidence | undefined) => void;
+
+/** Missing/unsupported identity fields cannot authorize destructive cleanup. */
+export function writtenFileIdentity(stat: BigIntStats): WrittenFileIdentity | undefined {
+  const { dev, ino, size, mtimeNs, ctimeNs } = stat;
+  if (
+    !stat.isFile() ||
+    typeof dev !== 'bigint' ||
+    dev <= 0n ||
+    typeof ino !== 'bigint' ||
+    ino <= 0n ||
+    typeof size !== 'bigint' ||
+    size < 0n ||
+    typeof mtimeNs !== 'bigint' ||
+    mtimeNs <= 0n ||
+    typeof ctimeNs !== 'bigint' ||
+    ctimeNs <= 0n
+  )
+    return undefined;
+  return { dev, ino, size, mtimeNs, ctimeNs };
+}
+
+const writes = new Map<string, Promise<WrittenFileEvidence | undefined>>();
+export async function atomicWrite(
+  filePath: string,
+  content: string | Uint8Array,
+  captureIdentity?: CaptureWrittenFileIdentity,
+  verification?: AtomicWriteVerification,
+): Promise<void> {
   const key = path.resolve(filePath);
   const operation = (writes.get(key) ?? Promise.resolve())
     .catch(() => undefined)
-    .then(() => writeFileAtomically(key, content));
+    .then(() => writeFileAtomically(key, content, !!captureIdentity, verification));
   writes.set(key, operation);
   try {
-    await operation;
+    const identity = await operation;
+    captureIdentity?.(identity);
   } finally {
     if (writes.get(key) === operation) writes.delete(key);
   }
 }
 
-async function writeFileAtomically(filePath: string, content: string | Uint8Array): Promise<void> {
+async function writeFileAtomically(
+  filePath: string,
+  content: string | Uint8Array,
+  captureIdentity: boolean,
+  verification?: AtomicWriteVerification,
+): Promise<WrittenFileEvidence | undefined> {
   await assertNoLinks(filePath);
+  await verification?.beforeWrite?.(filePath, content);
   const firstCreated = await fs.mkdir(path.dirname(filePath), { recursive: true });
   const temporary = `${filePath}.tmp-${randomUUID()}`;
+  let identity: WrittenFileEvidence | undefined;
   try {
     // Flush the candidate before it replaces the destination. Without this a power loss
     // shortly after the rename can leave an empty or truncated file under the final name.
     const handle = await fs.open(temporary, 'wx');
     try {
-      await handle.writeFile(content);
+      let sha256: string | undefined;
+      if (captureIdentity) {
+        const hash = createHash('sha256');
+        if (typeof content === 'string') {
+          // Strings are immutable; both APIs encode the same UTF-8 bytes.
+          hash.update(content, 'utf8');
+          await handle.writeFile(content);
+        } else {
+          // Keep only one bounded private chunk. Copy and hash synchronously,
+          // then finish writing before reusing it. Caller mutation can affect
+          // future chunks, but never makes the hash differ from the written bytes.
+          const buffer = Buffer.alloc(Math.min(64 * 1024, content.byteLength));
+          for (let offset = 0; offset < content.byteLength; offset += buffer.length) {
+            const chunk = buffer.subarray(0, Math.min(buffer.length, content.byteLength - offset));
+            chunk.set(content.subarray(offset, offset + chunk.length));
+            hash.update(chunk);
+            await handle.writeFile(chunk);
+          }
+        }
+        sha256 = hash.digest('hex');
+      } else {
+        await handle.writeFile(content);
+      }
+      await verification?.beforeCandidateSync?.(filePath);
       await handle.sync();
+      if (sha256) {
+        const stat = await handle
+          .stat({ bigint: true })
+          .then(writtenFileIdentity)
+          .catch(() => undefined);
+        if (stat) identity = { ...stat, sha256 };
+      }
     } finally {
       await handle.close();
     }
@@ -194,7 +288,12 @@ async function writeFileAtomically(filePath: string, content: string | Uint8Arra
     await fs.unlink(temporary).catch(() => undefined);
   }
   try {
-    await syncDirectoryEntry(path.dirname(filePath));
+    await syncDirectoryEntry(
+      path.dirname(filePath),
+      verification?.beforeParentSync
+        ? (directory, boundary) => verification.beforeParentSync!(filePath, directory, boundary)
+        : undefined,
+    );
     // If mkdir created ancestors, also persist their names in each containing directory.
     if (firstCreated && process.platform !== 'win32') {
       let parent = path.dirname(filePath);
@@ -206,6 +305,7 @@ async function writeFileAtomically(filePath: string, content: string | Uint8Arra
   } catch (error) {
     throw new CommittedWriteError(filePath, error);
   }
+  return identity;
 }
 
 /**
@@ -214,8 +314,17 @@ async function writeFileAtomically(filePath: string, content: string | Uint8Arra
  * Unsupported POSIX directory sync is best-effort. Permission and I/O errors propagate
  * even though replacement has already happened, so recovery must inspect live bytes.
  */
-async function syncDirectoryEntry(directory: string): Promise<void> {
-  if (process.platform === 'win32') return;
+async function syncDirectoryEntry(
+  directory: string,
+  beforeSync?: (
+    directory: string,
+    boundary: 'posix-directory-handle' | 'windows-directory-sync-unsupported',
+  ) => Promise<void> | undefined,
+): Promise<void> {
+  if (process.platform === 'win32') {
+    await beforeSync?.(directory, 'windows-directory-sync-unsupported');
+    return;
+  }
   let handle: Awaited<ReturnType<typeof fs.open>>;
   try {
     handle = await fs.open(directory, 'r');
@@ -224,6 +333,7 @@ async function syncDirectoryEntry(directory: string): Promise<void> {
     throw error;
   }
   try {
+    await beforeSync?.(directory, 'posix-directory-handle');
     await handle.sync();
   } catch (error) {
     if (!['EINVAL', 'ENOTSUP', 'EOPNOTSUPP'].includes((error as NodeJS.ErrnoException).code ?? ''))

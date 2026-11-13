@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
 import type { ProjectWatchEvent } from '../../shared/workflow-bridge';
 import type {
   Annotation,
@@ -47,14 +48,20 @@ interface MetadataMergeResult {
 }
 
 export interface ExternalProjectChange {
-  kind: 'external-change' | 'watch-error' | 'metadata-conflict';
+  kind: 'external-change' | 'watch-error' | 'metadata-conflict' | 'restore-warning';
   message: string;
 }
+
+type UnresolvedExternalProjectChange = ExternalProjectChange & {
+  kind: Exclude<ExternalProjectChange['kind'], 'restore-warning'>;
+};
 
 export interface ProjectPersistenceOptions {
   snapshot: ProjectSnapshot | null;
   activeScreenshot: ScreenshotRecord | null;
   sessionGeneration?: number;
+  nativeFaultVerification?: boolean;
+  verificationObserver?(): void;
   onProject(project: ProjectData): void;
   onSnapshot(snapshot: ProjectSnapshot, selectedItemId?: string): void;
   onSelectScreenshot(id: string): void;
@@ -70,12 +77,24 @@ export interface ProjectPersistenceController {
   saveState: SaveState;
   error: string;
   warning: string;
+  /** Visible notice, including retained Restore warnings after a conflict is resolved. */
   externalChange: ExternalProjectChange | null;
+  /** Reads unresolved conflict/monitoring state even when its notice has been dismissed. */
+  hasUnresolvedExternalChange(): boolean;
   projectRevision: string | null;
   hasUnsavedChanges: boolean;
   hasPendingProjectMetadata(): boolean;
   changeAnnotations(next: Annotation[]): void;
-  markScreenshotDirty(screenshot: ScreenshotRecord): void;
+  markScreenshotDirty(screenshot: ScreenshotRecord, retainedFixtureDraft?: boolean): void;
+  verificationState?(): {
+    acceptedRevision: string | null;
+    pendingMetadata: boolean;
+    pendingScreenshot: boolean;
+    nativeMutations: number;
+    externalChange: string | null;
+    warning: string;
+    error: string;
+  };
   queueProjectMetadata(project: ProjectData): number;
   flush(): Promise<boolean>;
   flushProjectDrafts(): Promise<boolean>;
@@ -101,6 +120,8 @@ export interface ProjectPersistenceController {
   getSavedContext(collectionId: string): Promise<{ snapshot: ProjectSnapshot; collectionId: string }>;
   reloadExternal(options?: { discardLocalChanges?: boolean }): Promise<boolean>;
   dismissExternalChange(): void;
+  /** Re-show the unresolved notice and its retained warnings without resolving it. */
+  revealExternalChange(): void;
   clearError(): void;
   clearWarning(): void;
 }
@@ -332,6 +353,8 @@ export function useProjectPersistence({
   snapshot,
   activeScreenshot,
   sessionGeneration = 0,
+  nativeFaultVerification = false,
+  verificationObserver,
   onProject,
   onSnapshot,
   onSelectScreenshot,
@@ -342,6 +365,14 @@ export function useProjectPersistence({
   const inFlight = useRef(new Map<string, Promise<boolean>>());
   const accessCounter = useRef(0);
   const snapshotRef = useRef<ProjectSnapshot | null>(snapshot);
+  // Path and caller-owned session generation identify an open workspace, even
+  // when the same path is reopened while an older readback is still pending.
+  const projectSession = useRef({ projectPath: snapshot?.projectPath, generation: sessionGeneration });
+  if (
+    projectSession.current.projectPath !== snapshot?.projectPath ||
+    projectSession.current.generation !== sessionGeneration
+  )
+    projectSession.current = { projectPath: snapshot?.projectPath, generation: sessionGeneration };
   const lastPropSnapshot = useRef<ProjectSnapshot | null>(snapshot);
   const lastSavedSnapshot = useRef<ProjectSnapshot | null>(snapshot);
   if (snapshot !== lastPropSnapshot.current) {
@@ -378,32 +409,75 @@ export function useProjectPersistence({
   const nativeMutationGeneration = useRef(0);
   const nativeMutationTokens = useRef(new Set<number>());
   const suspendedMetadataWaiters = useRef<Array<(saved: boolean) => void>>([]);
-  const pendingExternalChange = useRef<ExternalProjectChange | null>(null);
+  const pendingExternalChange = useRef<UnresolvedExternalProjectChange | null>(null);
+  const pendingExternalWarnings = useRef<string[]>([]);
   const [draft, setDraft] = useState<EditorDraft | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('saved');
-  const [error, setError] = useState('');
-  const [warning, setWarning] = useState('');
+  const [error, setErrorState] = useState('');
+  const [warning, setWarningState] = useState('');
+  const observedError = useRef('');
+  const observedWarning = useRef('');
+  const setError = useCallback((value: string) => {
+    observedError.current = value;
+    setErrorState(value);
+  }, []);
+  const setWarning = useCallback((value: string) => {
+    observedWarning.current = value;
+    setWarningState(value);
+  }, []);
   const [externalChange, setExternalChange] = useState<ExternalProjectChange | null>(null);
   const [projectRevision, setProjectRevision] = useState<string | null>(null);
   const [failedLoadKey, setFailedLoadKey] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
 
-  const publishAcceptedRevision = useCallback((revision: string | null) => {
-    acceptedRevision.current = revision;
-    setProjectRevision(revision);
-  }, []);
+  const publishAcceptedRevision = useCallback(
+    (revision: string | null) => {
+      acceptedRevision.current = revision;
+      setProjectRevision(revision);
+      verificationObserver?.();
+    },
+    [verificationObserver],
+  );
 
-  const publishExternalChange = useCallback((change: ExternalProjectChange | null) => {
-    // Losing monitoring must never downgrade an already observed external edit/conflict.
-    if (
-      change?.kind === 'watch-error' &&
-      pendingExternalChange.current &&
-      pendingExternalChange.current.kind !== 'watch-error'
-    )
-      return;
-    pendingExternalChange.current = change;
-    setExternalChange(change);
-  }, []);
+  const publishExternalChange = useCallback(
+    (
+      change: UnresolvedExternalProjectChange | null,
+      warnings: string[] = [],
+      { clearWarnings = false }: { clearWarnings?: boolean } = {},
+    ) => {
+      // Warning evidence and recovery guidance survive either ordering of a native
+      // result and watcher notifications, independently of the notice's priority.
+      pendingExternalWarnings.current = clearWarnings
+        ? []
+        : [...new Set([...pendingExternalWarnings.current, ...warnings])];
+      // Losing monitoring must never downgrade an already observed external edit/conflict.
+      if (
+        change?.kind === 'watch-error' &&
+        pendingExternalChange.current &&
+        pendingExternalChange.current.kind !== 'watch-error'
+      ) {
+        if (!warnings.length) return;
+        change = pendingExternalChange.current;
+      }
+      pendingExternalChange.current = change;
+      // Resolving a conflict restores its existing save authority, but does not
+      // resolve a prior durability warning. A warning-only notice is display state.
+      const notice =
+        change ??
+        (pendingExternalWarnings.current.length ? { kind: 'restore-warning' as const, message: '' } : null);
+      setExternalChange(
+        notice
+          ? {
+              ...notice,
+              message: [...new Set([...pendingExternalWarnings.current, notice.message])]
+                .filter(Boolean)
+                .join(' '),
+            }
+          : null,
+      );
+    },
+    [],
+  );
 
   // A native save may have read an external project.json before merging its own content.
   // Only an unbroken transaction chain can advance the pre-crash metadata CAS baseline.
@@ -560,7 +634,7 @@ export function useProjectPersistence({
         setFailedLoadKey(activeKey);
         setError(workflowMessage(reason, 'The screenshot could not be loaded.'));
       });
-  }, [activeKey, activeScreenshot, evictCleanDrafts, loadAttempt, setCurrentDraft, snapshot]);
+  }, [activeKey, activeScreenshot, evictCleanDrafts, loadAttempt, setCurrentDraft, setError, snapshot]);
 
   const saveKey = useCallback(
     (key: string): Promise<boolean> => {
@@ -708,6 +782,8 @@ export function useProjectPersistence({
       publishAcceptedRevision,
       publishExternalChange,
       setCurrentDraft,
+      setError,
+      setWarning,
     ],
   );
 
@@ -750,7 +826,15 @@ export function useProjectPersistence({
         });
         return;
       }
-      if (event.projectRevision && event.projectRevision === acceptedRevision.current) return;
+      // This revision hashes project.json only. An unchanged metadata revision
+      // cannot confirm description, annotation or other member-file bytes.
+      if (
+        event.projectRevision &&
+        event.projectRevision === acceptedRevision.current &&
+        event.changedPaths.length > 0 &&
+        event.changedPaths.every((changed) => changed === 'project.json')
+      )
+        return;
       // A watch event is never an accepted CAS baseline, including during recovery.
       publishExternalChange({
         kind: 'external-change',
@@ -768,7 +852,7 @@ export function useProjectPersistence({
     const projectPath = snapshot?.projectPath;
     let cancelled = false;
     publishAcceptedRevision(null);
-    publishExternalChange(null);
+    publishExternalChange(null, [], { clearWarnings: true });
     let resolveReady!: (ready: boolean) => void;
     watchReady.current = new Promise((resolve) => {
       resolveReady = resolve;
@@ -802,6 +886,7 @@ export function useProjectPersistence({
       })
       .catch((reason) => {
         resolveReady(false);
+        if (cancelled) return;
         publishExternalChange({
           kind: 'watch-error',
           message: workflowMessage(reason, 'External project changes cannot be monitored right now.'),
@@ -924,7 +1009,7 @@ export function useProjectPersistence({
     });
     metadataSave.current = operation;
     return operation;
-  }, [flush, overlayTrackedMetadata, publishAcceptedRevision, publishExternalChange]);
+  }, [flush, overlayTrackedMetadata, publishAcceptedRevision, publishExternalChange, setError]);
 
   // A root error boundary unmounts the watcher before its retained save closure runs.
   // Reconnect only for that recovery save, retaining the last accepted CAS baseline:
@@ -1028,7 +1113,14 @@ export function useProjectPersistence({
     (token: number, unconfirmedRestore?: string): Promise<boolean> => {
       if (unconfirmedRestore) {
         publishAcceptedRevision(null);
-        publishExternalChange({ kind: 'metadata-conflict', message: unconfirmedRestore });
+        const message = unconfirmedRestore.split(COMMITTED_WRITE_WARNING).join(' ').trim();
+        publishExternalChange(
+          { kind: 'metadata-conflict', message },
+          [
+            unconfirmedRestore.includes(COMMITTED_WRITE_WARNING) ? COMMITTED_WRITE_WARNING : '',
+            message,
+          ].filter(Boolean),
+        );
       }
       return finishNativeMutation(token, !unconfirmedRestore);
     },
@@ -1038,10 +1130,13 @@ export function useProjectPersistence({
   const reloadExternal = useCallback(
     async (options?: { discardLocalChanges?: boolean }) => {
       if (!watchId.current) return false;
+      const session = projectSession.current;
+      const isCurrent = () => projectSession.current === session;
       const discardLocalChanges = options?.discardLocalChanges === true;
       if (discardLocalChanges) {
         if (metadataSave.current) await metadataSave.current;
         await Promise.allSettled([...inFlight.current.values()]);
+        if (!isCurrent()) return false;
         const projectPath = snapshotRef.current?.projectPath;
         if (projectPath) {
           for (const [key, retained] of drafts.current) {
@@ -1059,13 +1154,16 @@ export function useProjectPersistence({
         metadataDirty.current ||
         hasDirtyDrafts(snapshotRef.current?.projectPath)
       ) {
+        if (!isCurrent()) return false;
         setError('Reload was cancelled so your unsaved project details stay open. Save or undo them first.');
         return false;
       }
+      if (!isCurrent()) return false;
       try {
         const latest = workflowValue(
           await getRendererBridge().reloadWatchedProject({ watchId: watchId.current }),
         );
+        if (!isCurrent()) return false;
         const reloadedProjectPath = latest.snapshot.projectPath;
         for (const [key, retained] of drafts.current) {
           if (
@@ -1079,22 +1177,29 @@ export function useProjectPersistence({
         snapshotRef.current = latest.snapshot;
         lastSavedSnapshot.current = latest.snapshot;
         callbacks.current.onSnapshot(latest.snapshot);
-        publishExternalChange(null);
+        publishExternalChange(null, [], { clearWarnings: true });
         return true;
       } catch (reason) {
+        if (!isCurrent()) return false;
         setError(workflowMessage(reason, 'The project could not be reloaded.'));
         return false;
       }
     },
-    [flush, hasDirtyDrafts, publishAcceptedRevision, publishExternalChange],
+    [flush, hasDirtyDrafts, publishAcceptedRevision, publishExternalChange, setError],
   );
 
   const adoptAuthoritativeSnapshot = useCallback(
     async (
       authoritativeSnapshot: ProjectSnapshot,
       nativeMutationToken?: number,
-      isCurrent: () => boolean = () => true,
+      isRequestCurrent: () => boolean = () => true,
     ): Promise<boolean> => {
+      const session = projectSession.current;
+      const isCurrent = () => projectSession.current === session && isRequestCurrent();
+      const cancelAdoption = async (): Promise<false> => {
+        await finishNativeMutation(nativeMutationToken, false);
+        return false;
+      };
       if (
         nativeMutationTokens.current.size &&
         (nativeMutationToken === undefined || !nativeMutationTokens.current.has(nativeMutationToken))
@@ -1103,14 +1208,15 @@ export function useProjectPersistence({
         return false;
       }
       if (!(await flush())) {
-        await finishNativeMutation(nativeMutationToken, false);
-        return false;
+        return cancelAdoption();
       }
+      if (!isCurrent()) return cancelAdoption();
 
       const sameProject = snapshotRef.current?.projectPath === authoritativeSnapshot.projectPath;
       if (!sameProject && !(await finishNativeMutation(nativeMutationToken, true))) return false;
       if (nativeMutationToken === undefined && metadataDirty.current && !(await flushProjectMetadata()))
         return false;
+      if (!isCurrent()) return cancelAdoption();
       if (!sameProject && (pendingMetadata.current || metadataInFlight.current || hasDirtyDrafts())) {
         setError('The reopened project was not adopted because newer local edits are still waiting to save.');
         return false;
@@ -1122,6 +1228,7 @@ export function useProjectPersistence({
       // now be stale, so same-project adoption always starts from a fresh disk snapshot.
       if (sameProject) {
         const ready = await watchReady.current;
+        if (!isCurrent()) return cancelAdoption();
         const id = watchId.current;
         if (!ready || !id) {
           await finishNativeMutation(nativeMutationToken, false);
@@ -1148,8 +1255,7 @@ export function useProjectPersistence({
       // Navigation may have changed during flush, watch setup, or reload. Never publish
       // that older snapshot (or clear its drafts) over the later destination.
       if (!isCurrent()) {
-        await finishNativeMutation(nativeMutationToken, false);
-        return false;
+        return cancelAdoption();
       }
       if (sameProject) {
         for (const [key, retained] of drafts.current) {
@@ -1170,7 +1276,7 @@ export function useProjectPersistence({
         await finishNativeMutation(nativeMutationToken, false);
         return false;
       }
-      publishExternalChange(null);
+      publishExternalChange(null, [], { clearWarnings: !sameProject });
       if (sameProject && !(await finishNativeMutation(nativeMutationToken, true))) return false;
       return !sameProject || revision !== null;
     },
@@ -1178,6 +1284,7 @@ export function useProjectPersistence({
       finishNativeMutation,
       flush,
       flushProjectMetadata,
+      setError,
       hasDirtyDrafts,
       overlayTrackedMetadata,
       publishAcceptedRevision,
@@ -1199,16 +1306,36 @@ export function useProjectPersistence({
     error,
     warning,
     externalChange,
+    hasUnresolvedExternalChange: () => pendingExternalChange.current !== null,
     projectRevision,
     hasUnsavedChanges: hasDirtyDrafts() || metadataDirty.current,
     hasPendingProjectMetadata: () => metadataDirty.current,
+    ...(nativeFaultVerification
+      ? {
+          verificationState: () => ({
+            acceptedRevision: acceptedRevision.current,
+            pendingMetadata: metadataDirty.current,
+            pendingScreenshot: hasDirtyDrafts(),
+            nativeMutations: nativeMutationTokens.current.size,
+            externalChange: pendingExternalChange.current?.message ?? null,
+            warning: observedWarning.current,
+            error: observedError.current,
+          }),
+        }
+      : {}),
     changeAnnotations(next) {
       const current = activeKeyRef.current ? drafts.current.get(activeKeyRef.current) : undefined;
       if (!current) return;
       setCurrentDraft({ ...current, annotations: next, editRevision: current.editRevision + 1 });
     },
-    markScreenshotDirty(screenshot) {
-      const current = activeKeyRef.current ? drafts.current.get(activeKeyRef.current) : undefined;
+    markScreenshotDirty(screenshot, retainedFixtureDraft = false) {
+      if (retainedFixtureDraft && !nativeFaultVerification) throw new Error('Unowned fixture draft input.');
+      const key =
+        retainedFixtureDraft && snapshotRef.current
+          ? draftKey(snapshotRef.current.projectPath, screenshot.id)
+          : activeKeyRef.current;
+      const current = key ? drafts.current.get(key) : undefined;
+      if (retainedFixtureDraft && !current) throw new Error('Fixture screenshot was never loaded.');
       if (!current) return;
       setCurrentDraft({ ...current, screenshot, editRevision: current.editRevision + 1 });
     },
@@ -1234,9 +1361,16 @@ export function useProjectPersistence({
       transition,
       restoredRevision,
     ) {
+      const session = projectSession.current;
+      const isCurrent = () => projectSession.current === session;
+      const cancelAdoption = async (): Promise<false> => {
+        await finishNativeMutation(nativeMutationToken, false);
+        return false;
+      };
       const mutatesCurrentProject = snapshotRef.current?.projectPath === mutationSnapshot.projectPath;
       if (!mutatesCurrentProject) {
         await finishNativeMutation(nativeMutationToken, false);
+        if (!isCurrent()) return false;
         snapshotRef.current = mutationSnapshot;
         lastSavedSnapshot.current = mutationSnapshot;
         callbacks.current.onSnapshot(mutationSnapshot, selectScreenshotId);
@@ -1252,24 +1386,35 @@ export function useProjectPersistence({
       if (recovering.current) acceptRecoveryTransition(transition);
       if (!(await flush())) {
         await finishNativeMutation(nativeMutationToken, false);
+        if (!isCurrent()) return false;
+        if (mutationSnapshot.warnings?.length) {
+          const message =
+            'Restore completed, but your newer screenshot edits could not be saved. Your open edits were preserved; resolve the save failure, then reload and compare before continuing.';
+          publishExternalChange({ kind: 'watch-error', message }, [...mutationSnapshot.warnings, message]);
+        }
         return false;
       }
+      if (!isCurrent()) return cancelAdoption();
       const ready = await watchReady.current;
+      if (!isCurrent()) return cancelAdoption();
       const id = watchId.current;
       if (!ready || !id) {
         await finishNativeMutation(nativeMutationToken, false);
+        if (!isCurrent()) return false;
         publishAcceptedRevision(null);
-        publishExternalChange({
-          kind: 'watch-error',
-          message:
-            'The project changed, but safe change monitoring is not ready. Your open edits were preserved; reconnect the workspace and reload before continuing.',
-        });
+        const message =
+          'The project changed, but safe change monitoring is not ready. Your open edits were preserved; reconnect the workspace and reload before continuing.';
+        publishExternalChange(
+          { kind: 'watch-error', message },
+          mutationSnapshot.warnings?.length ? [...mutationSnapshot.warnings, message] : [],
+        );
         return false;
       }
       try {
         // Always reload after a native mutation. Its response can be older than edits saved while the
         // native request was in flight, whereas the watcher returns the latest authoritative snapshot.
         const latest = workflowValue(await getRendererBridge().reloadWatchedProject({ watchId: id }));
+        if (!isCurrent()) return cancelAdoption();
         if (restoredRevision && latest.projectRevision !== restoredRevision)
           throw new Error(
             'The project changed again after Restore. Your edits remain open; reload, compare, and save again.',
@@ -1306,6 +1451,7 @@ export function useProjectPersistence({
         )
           publishExternalChange(null);
         if (!(await finishNativeMutation(nativeMutationToken, true))) return false;
+        if (!isCurrent()) return false;
         if (
           selectScreenshotId &&
           [
@@ -1317,17 +1463,16 @@ export function useProjectPersistence({
         return acceptedRevision.current !== null && !pendingExternalChange.current;
       } catch (reason) {
         await finishNativeMutation(nativeMutationToken, false);
+        if (!isCurrent()) return false;
         publishAcceptedRevision(null);
-        publishExternalChange({
-          kind: 'watch-error',
-          message: [
-            ...(mutationSnapshot.warnings ?? []),
-            workflowMessage(
-              reason,
-              'The project changed, but its latest safe version could not be reloaded. Your open edits were preserved; reconnect the workspace before continuing.',
-            ),
-          ].join(' '),
-        });
+        const message = workflowMessage(
+          reason,
+          'The project changed, but its latest safe version could not be reloaded. Your open edits were preserved; reconnect the workspace before continuing.',
+        );
+        publishExternalChange(
+          { kind: 'watch-error', message },
+          mutationSnapshot.warnings?.length ? [...mutationSnapshot.warnings, message] : [],
+        );
         return false;
       }
     },
@@ -1350,7 +1495,7 @@ export function useProjectPersistence({
       setError('');
       setWarning('');
       publishAcceptedRevision(null);
-      publishExternalChange(null);
+      publishExternalChange(null, [], { clearWarnings: true });
     },
     async getSavedContext(requestedCollectionId) {
       await watchReady.current;
@@ -1371,6 +1516,9 @@ export function useProjectPersistence({
     },
     reloadExternal,
     dismissExternalChange: () => setExternalChange(null),
+    revealExternalChange: () => {
+      if (pendingExternalChange.current) publishExternalChange(pendingExternalChange.current);
+    },
     clearError: () => setError(''),
     clearWarning: () => setWarning(''),
   };

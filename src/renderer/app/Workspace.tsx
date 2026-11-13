@@ -16,6 +16,7 @@ import { CollectionRail } from '../collection/CollectionRail';
 import { AnnotationCanvas } from '../components/AnnotationCanvas';
 import type { AnnotationChangeOptions } from '../canvas/undo-coalescing';
 import { ErrorBoundary } from '../components/ErrorBoundary';
+import { NativeFaultProbe } from './native-fault-probe';
 import { Toolbar, type ToolChoice } from '../components/Toolbar';
 import { Button, EmptyState, IconButton } from '../components/ui';
 import { ScreenshotInspector } from '../inspector/ScreenshotInspector';
@@ -280,6 +281,7 @@ export function Workspace(props: WorkspaceProps) {
             )
           ) : item.kind === 'drawing' ? (
             <ErrorBoundary variant="panel" resetKey={item.id}>
+              <NativeFaultProbe scope="panel" />
               <Suspense fallback={drawingPlaceholder('Loading drawing tools…')}>
                 <DrawingEditor
                   key={item.id}
@@ -304,6 +306,7 @@ export function Workspace(props: WorkspaceProps) {
           )
         ) : shot ? (
           <ErrorBoundary variant="panel" resetKey={shot.id}>
+            <NativeFaultProbe scope="panel" />
             <AnnotationCanvas
               key={`${store.snapshot?.projectPath}:${shot.id}`}
               image={props.image}

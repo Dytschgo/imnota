@@ -1,6 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import type { FileHandle } from 'node:fs/promises';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { terminalUpdateArguments } from './terminal-update.js';
 import type { ReleaseCandidate } from './releases.js';
 import { UpdateFailure } from './update-controller.js';
@@ -36,6 +37,8 @@ export class MacUpdateSession {
       this.resolveReady = resolve;
       this.rejectReady = reject;
     });
+    // A fast helper exit can reject before startMacUpdate returns to its caller.
+    void this.ready.catch(() => undefined);
   }
 
   get downloading() {
@@ -104,26 +107,32 @@ export async function startMacUpdate(
   const directory = await fs.mkdtemp(path.join(options.cachePath, 'imnota-update-'));
   const helper = path.join(directory, 'update-macos.sh');
   const logPath = path.join(directory, 'update.log');
-  await fs.copyFile(options.helperPath, helper);
-  await fs.chmod(helper, 0o700);
-  const log = await fs.open(logPath, 'a', 0o600);
-  let child;
+  let log: FileHandle | undefined;
+  let reader: FileHandle | undefined;
+  let child: ChildProcess;
   try {
+    await fs.copyFile(options.helperPath, helper);
+    await fs.chmod(helper, 0o700);
+    log = await fs.open(logPath, 'a', 0o600);
+    reader = await fs.open(logPath, 'r');
     child = spawn('/bin/bash', [helper, '--in-app', String(options.appPid), ...args], {
       detached: true,
       stdio: ['ignore', log.fd, log.fd],
     });
-  } finally {
-    await log.close();
+  } catch (error) {
+    await Promise.allSettled([log?.close(), reader?.close()]);
+    await fs.rm(directory, { recursive: true, force: true });
+    throw error;
   }
+  const logReader = reader;
+  // Do not await anything between spawning and installing the process listeners.
   child.unref();
-  const reader = await fs.open(logPath, 'r');
   let offset = 0;
   const read = async () => {
     let text = '';
     for (;;) {
       const chunk = Buffer.alloc(64 * 1024);
-      const { bytesRead } = await reader.read(chunk, 0, chunk.length, offset);
+      const { bytesRead } = await logReader.read(chunk, 0, chunk.length, offset);
       if (bytesRead === 0) return text;
       offset += bytesRead;
       text += chunk.subarray(0, bytesRead).toString('utf8');
@@ -138,19 +147,23 @@ export async function startMacUpdate(
   };
   const timer = setInterval(poll, pollMs);
   // Exit is reported after the final log read so its failure reason is never lost.
+  let finishing = false;
   const finish = (code: number | null) => {
+    if (finishing) return;
+    finishing = true;
     clearInterval(timer);
     void reading
       .then(read)
       .catch(() => '')
       .then((remaining) => {
         session.exited(code, remaining);
-        return reader.close();
+        return logReader.close();
       })
       .then(() => fs.rm(directory, { recursive: true, force: true }))
       .catch(() => undefined);
   };
   child.once('exit', finish);
   child.once('error', () => finish(null));
+  await log.close();
   return session;
 }

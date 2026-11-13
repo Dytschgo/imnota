@@ -8,6 +8,7 @@ import {
   type PromptBundleActionRequest,
   type PromptBundleCardModel,
 } from './PromptBundleCard';
+import type { PromptBundleControllerError } from './prompt-export-controller-core';
 import './prompt-bundles.css';
 
 export interface PromptSharingDialogProps {
@@ -17,7 +18,7 @@ export interface PromptSharingDialogProps {
   defaultCopyVariant?: WindowsCopyVariantId;
   bundles: readonly PromptBundleCardModel[];
   progress?: PromptBundleProgress;
-  error?: { message: string; technicalDetails?: string };
+  error?: PromptBundleControllerError;
   preferenceError?: string;
   cleanupPending?: boolean;
   noContentMessage?: string;
@@ -36,6 +37,8 @@ export interface PromptSharingDialogProps {
   onLoadPreview?(request: PromptBundleActionRequest): void | Promise<void>;
   onOpenExportFolder?(): void | Promise<void>;
   onCancel?(): void | Promise<void>;
+  onRebuild?(): void | Promise<void>;
+  onRetry?(): void | Promise<void>;
   onRetryCleanup?(): void | Promise<void>;
   onShareHosted?(): void | Promise<void>;
 }
@@ -82,17 +85,50 @@ export function PromptSharingDialog({
   onOpenExportFolder,
   onCancel,
   onRetryCleanup,
+  onRebuild,
+  onRetry,
   onShareHosted,
 }: PromptSharingDialogProps) {
   const busy = progress
     ? ['checking', 'planning', 'rendering', 'writing', 'copying'].includes(progress.phase)
     : false;
+  // Splitting can advance progress before the replacement cards arrive. Their
+  // numbers no longer identify the same content, so show continuation on the last
+  // row and explain it in the status rather than implying an exact bundle match.
+  const updatingRows = Boolean(
+    busy &&
+    progress?.bundleNumber &&
+    bundles.length &&
+    ((progress.totalBundles !== undefined && progress.totalBundles !== bundles.length) ||
+      !bundles.some((bundle) => bundle.bundleNumber === progress.bundleNumber)),
+  );
+  const activeBundleNumber = busy
+    ? updatingRows
+      ? bundles.at(-1)?.bundleNumber
+      : progress?.bundleNumber
+    : undefined;
   // bundleNumber is the item being processed, not completed work, and rendering can
   // split the plan again before writing starts, so it is not shown as a percentage.
   const progressValue = progress?.phase === 'complete' ? 100 : undefined;
   const showProgressBar =
     progress && ['planning', 'rendering', 'writing', 'complete'].includes(progress.phase);
-  const rebuildBundle = bundles.find((bundle) => bundle.state === 'error') ?? bundles[0];
+  const rebuildBundle =
+    bundles.find(
+      (bundle) =>
+        bundle.planId === error?.bundle?.planId &&
+        bundle.artifactSessionId === error.bundle.artifactSessionId &&
+        bundle.bundleNumber === error.bundle.bundleNumber,
+    ) ??
+    bundles.find((bundle) => bundle.state === 'error') ??
+    bundles[0];
+  // The hairline mirrors the status below it; it never shows a measured amount.
+  const hairlineTone = busy
+    ? 'busy'
+    : error || progress?.phase === 'error'
+      ? 'error'
+      : progress?.phase === 'complete'
+        ? 'complete'
+        : 'idle';
   return (
     <Modal
       hidden={hidden}
@@ -102,12 +138,16 @@ export function PromptSharingDialog({
       closeTestId="prompt-sharing-close"
     >
       <section className="prompt-sharing-dialog" aria-busy={busy} data-testid="prompt-sharing-dialog">
+        <div className="prompt-sharing-hairline" data-tone={hairlineTone} aria-hidden="true">
+          <span />
+        </div>
         {progress && !(error && progress.phase === 'error') && (
           <div className={`prompt-sharing-progress prompt-sharing-progress-${progress.phase}`} role="status">
             <div>
               <span>{progressLabel(progress)}</span>
               {progressValue !== undefined && <strong>{progressValue}%</strong>}
             </div>
+            {updatingRows && <p>Updating bundle rows; activity is shown on the last row.</p>}
             {showProgressBar && (
               <progress value={progressValue} max={100} aria-label="Prompt export progress" />
             )}
@@ -125,26 +165,32 @@ export function PromptSharingDialog({
                 </details>
               )}
             </div>
-            {cleanupPending
-              ? onRetryCleanup && (
-                  <Button variant="soft" onClick={() => void onRetryCleanup()}>
-                    Retry cleanup
-                  </Button>
-                )
-              : rebuildBundle && (
-                  <Button
-                    variant="soft"
-                    onClick={() =>
-                      void onPrepareFreshFiles({
-                        planId: rebuildBundle.planId,
-                        artifactSessionId: rebuildBundle.artifactSessionId,
-                        bundleNumber: rebuildBundle.bundleNumber,
-                      })
-                    }
-                  >
-                    Rebuild bundles
-                  </Button>
-                )}
+            {/* A pending cleanup blocks every other export action, so it always wins. */}
+            {(cleanupPending || error.recovery === 'retry-cleanup') && onRetryCleanup ? (
+              <Button variant="soft" disabled={busy} onClick={() => void onRetryCleanup()}>
+                Retry cleanup
+              </Button>
+            ) : error.retryable && error.recovery === 'retry' && onRetry ? (
+              <Button variant="soft" disabled={busy} onClick={() => void onRetry()}>
+                Try again
+              </Button>
+            ) : error.retryable && error.recovery === 'rebuild' && (rebuildBundle || onRebuild) ? (
+              <Button
+                variant="soft"
+                disabled={busy || cleanupPending}
+                onClick={() => {
+                  if (rebuildBundle)
+                    void onPrepareFreshFiles({
+                      planId: rebuildBundle.planId,
+                      artifactSessionId: rebuildBundle.artifactSessionId,
+                      bundleNumber: rebuildBundle.bundleNumber,
+                    });
+                  else void onRebuild?.();
+                }}
+              >
+                Rebuild bundles
+              </Button>
+            ) : null}
           </div>
         )}
         {preferenceError && (
@@ -170,13 +216,15 @@ export function PromptSharingDialog({
           <div className="prompt-bundle-list">
             {bundles.map((bundle) => (
               <PromptBundleCard
-                key={`${bundle.planId}:${bundle.bundleNumber}`}
+                key={bundle.bundleNumber}
                 bundle={bundle}
+                active={activeBundleNumber === bundle.bundleNumber}
                 disabled={busy}
                 fileClipboardAvailable={fileClipboardAvailable}
                 platform={platform}
                 defaultCopyVariant={defaultCopyVariant}
                 errorReported={Boolean(error)}
+                fallbackAvailable={Boolean(error?.fallbackAvailable && bundle === rebuildBundle)}
                 onCopyFresh={onCopyFresh}
                 onCopyVariant={onCopyVariant}
                 onSelectCopyVariant={onSelectCopyVariant}
