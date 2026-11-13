@@ -238,6 +238,10 @@ test('creates, renders and downloads only controlled finalized artifacts', async
   const created = await share(instance, {
     title: '<img src=x onerror=alert(1)>',
     markdown: '# Heading\n\n<script>alert(1)</script>\n\n[bad](javascript:alert(2))',
+    images: [
+      { filename: 'prompt-001.png', dataBase64: onePixelPng.toString('base64') },
+      { filename: 'prompt-002.png', dataBase64: onePixelPng.toString('base64') },
+    ],
   });
   assert.equal(created.status, 201, created.text);
   assert.equal(created.body.title, '<img src=x onerror=alert(1)>');
@@ -271,6 +275,7 @@ test('creates, renders and downloads only controlled finalized artifacts', async
   assert.match(markdown.headers['content-type'], /^text\/markdown/);
   assert.equal(markdown.headers['content-disposition'], 'attachment; filename="prompt.md"');
   const image = await instance.api.get(`/s/${publicToken}/assets/prompt-001.png`).expect(200);
+  const secondImage = await instance.api.get(`/s/${publicToken}/assets/prompt-002.png`).expect(200);
   assert.match(image.headers['content-type'], /^image\/png/);
   assert.equal(image.headers['x-content-type-options'], 'nosniff');
   const zip = await instance.api
@@ -285,9 +290,10 @@ test('creates, renders and downloads only controlled finalized artifacts', async
   assert.match(zip.headers['content-type'], /^application\/zip/);
   assert.equal(zip.body.subarray(0, 2).toString(), 'PK');
   const entries = await archiveEntries(zip.body);
-  assert.deepEqual([...entries.keys()].sort(), ['prompt-001.png', 'prompt.md']);
+  assert.deepEqual([...entries.keys()], ['prompt.md', 'prompt-001.png', 'prompt-002.png']);
   assert.equal(entries.get('prompt.md').toString('utf8'), markdown.text);
   assert.deepEqual(entries.get('prompt-001.png'), image.body);
+  assert.deepEqual(entries.get('prompt-002.png'), secondImage.body);
 });
 
 test('archive source warning removes the partial ZIP before returning an error', async (t) => {
