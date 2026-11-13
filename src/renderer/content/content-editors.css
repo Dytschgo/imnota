@@ -10,9 +10,7 @@
 }
 
 .content-editor-heading,
-.content-loading,
-.content-inspector,
-.content-hint {
+.content-loading {
   padding: 12px 14px;
 }
 
@@ -24,16 +22,10 @@
   font-weight: 650;
 }
 
-.content-loading,
-.content-hint {
+.content-loading {
   color: var(--ink-3);
   font-size: 12px;
   line-height: 1.45;
-}
-
-.content-inspector {
-  border-top: 1px solid var(--line);
-  color: var(--ink-2);
 }
 
 .drawing-editor-tools,

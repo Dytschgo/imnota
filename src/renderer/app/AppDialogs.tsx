@@ -86,7 +86,7 @@ export function AppDialogs({
             onChange={(event) => onNewProjectChange({ ...newProject, description: event.target.value })}
           />
           <fieldset className="project-icon-picker">
-            <legend>Project icon</legend>
+            <legend className="field-label">Project icon</legend>
             <div>
               {PROJECT_ICON_OPTIONS.map(({ key, Icon }) => (
                 <button
@@ -102,7 +102,7 @@ export function AppDialogs({
             </div>
           </fieldset>
           <fieldset className="template-picker">
-            <legend className="template-picker-heading">Start from template</legend>
+            <legend className="template-picker-heading field-label">Start from template</legend>
             <p className="muted">Optional editable Markdown blocks are added to the first collection.</p>
             <div className="template-picker-options">
               <label className={`template-picker-option${!newProject.templateId ? ' selected' : ''}`}>
@@ -182,7 +182,7 @@ export function AppDialogs({
             onChange={(event) => onEditProjectChange({ ...editProject, description: event.target.value })}
           />
           <fieldset className="project-icon-picker">
-            <legend>Project icon</legend>
+            <legend className="field-label">Project icon</legend>
             <div>
               {PROJECT_ICON_OPTIONS.map(({ key, Icon }) => (
                 <button

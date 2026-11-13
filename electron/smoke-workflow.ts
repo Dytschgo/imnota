@@ -3550,10 +3550,17 @@ export async function runSmokeWorkflow(
   await checkpoint('existing image, clipboard, recovery and benchmark checks complete');
   artifacts.push(...(await exerciseMixedContent(driver, host, artifactDirectory)));
   assertions.push(
+    'text and drawing inspector Duplicate is reachable by native Tab and Enter persists each copy',
+  );
+  assertions.push(
     'mixed text/drawing UI, Markdown preview, autosave before navigation, editable scene and white PNG, duplicate/trash/Undo and reopen',
     'Recently deleted restores screenshot, drawing and text through the dialog after Undo toast expiry; success focus and saved/reopened bytes agree',
   );
   artifacts.push(...(await exerciseUiFeedback(driver, host, artifactDirectory)));
+  assertions.push('no-match scope action preserves the query and input focus; canvas hint fits at 110% zoom');
+  assertions.push(
+    'MCP copy failure is announced, retry succeeds, and incomplete guide has an uncompleted state',
+  );
   assertions.push(
     'full Markdown and annotation search targets, project icon/edit CAS, archive scope isolation and restore',
   );

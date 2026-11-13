@@ -49,7 +49,9 @@ export function AgentAccessSettings({
             ? 'Copying…'
             : copied
               ? `${copied === 'prompt' ? 'Setup prompt' : copied === 'http' ? 'HTTP configuration' : 'Stdio configuration'} copied to clipboard.`
-              : ''}
+              : copyError
+                ? `${label === 'prompt' ? 'Setup prompt' : label === 'http' ? 'HTTP configuration' : 'Stdio configuration'} could not be copied. Select the text and copy it instead.`
+                : ''}
         </p>
         {copyError && (
           <p role="alert" className="imnota-preference-error">
@@ -106,7 +108,11 @@ export function AgentAccessSettings({
             onClick={() => void copySnippet('prompt', agentAccessSetupPrompt())}
           >
             <Copy size={14} aria-hidden="true" />
-            {copied === 'prompt' ? 'Copied' : 'Copy prompt'}
+            {copied === 'prompt'
+              ? 'Copied'
+              : attempted === 'prompt' && copyError
+                ? 'Copy failed'
+                : 'Copy prompt'}
           </Button>
         </div>
         {copyFeedback('prompt')}
@@ -131,7 +137,7 @@ export function AgentAccessSettings({
               onClick={() => void copySnippet('http', localAgentAccessHttpSnippet())}
             >
               <Copy size={14} aria-hidden="true" />
-              {copied === 'http' ? 'Copied' : 'Copy'}
+              {copied === 'http' ? 'Copied' : attempted === 'http' && copyError ? 'Copy failed' : 'Copy'}
             </Button>
           </div>
           {copyFeedback('http')}
@@ -147,7 +153,7 @@ export function AgentAccessSettings({
               onClick={() => void copySnippet('stdio', localAgentAccessStdioSnippet())}
             >
               <Copy size={14} aria-hidden="true" />
-              {copied === 'stdio' ? 'Copied' : 'Copy'}
+              {copied === 'stdio' ? 'Copied' : attempted === 'stdio' && copyError ? 'Copy failed' : 'Copy'}
             </Button>
           </div>
           {copyFeedback('stdio')}

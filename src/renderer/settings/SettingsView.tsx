@@ -185,9 +185,8 @@ export function SettingsView({
             </p>
           )}
           {group === 'Backups & history' && (
-            <p>
-              Keep validated project snapshots on this device. Exports and recovery caches are not duplicated.
-            </p>
+            // The Local history card below explains what a snapshot contains; this line says why to be here.
+            <p>Snapshot projects on this device and restore an earlier version when you need it.</p>
           )}
           {group === 'Updates & about' && (
             <p>Keep Imnota up to date, learn what’s new, and find helpful resources.</p>

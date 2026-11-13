@@ -1,7 +1,7 @@
 import { localAgentAccessStdioSnippet } from '../../shared/preferences';
 import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
 import { useAppStore } from '../store';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SettingsView } from './SettingsView';
 
@@ -73,6 +73,21 @@ describe('SettingsView category navigation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Copy prompt' }));
     await screen.findByRole('button', { name: 'Copied' });
     expect(copyText).toHaveBeenCalledExactlyOnceWith(prompt);
+  });
+
+  it('says when the MCP setup prompt could not be copied', async () => {
+    window.imnota = {
+      copyText: vi.fn(async () => {
+        throw new Error('Clipboard unavailable');
+      }),
+    } as unknown as typeof window.imnota;
+    render(<SettingsView activeCategory="Features" />);
+    const section = screen.getByRole('region', { name: 'MCP access Beta' });
+    fireEvent.click(within(section).getByRole('button', { name: 'Copy prompt' }));
+    await within(section).findByRole('button', { name: 'Copy failed' });
+    expect(within(section).getByRole('status')).toHaveTextContent(
+      'Setup prompt could not be copied. Select the text and copy it instead.',
+    );
   });
 
   it('replays what’s new from Updates & about', () => {
