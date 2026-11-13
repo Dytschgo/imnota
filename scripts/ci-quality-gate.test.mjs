@@ -15,6 +15,25 @@ function successfulNeeds(docsOnly = 'false') {
   );
 }
 
+test('live Mac metadata token is read-only and confined to verification after fixture packaging', () => {
+  const workflow = load(readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8'));
+  const job = workflow.jobs.package;
+  assert.ok(Object.values(job.permissions).every((permission) => permission === 'read'));
+  assert.equal(workflow.env?.IMNOTA_CI_RELEASE_TOKEN, undefined);
+  assert.equal(job.env?.IMNOTA_CI_RELEASE_TOKEN, undefined);
+  const bindings = job.steps.filter((step) => step.env?.IMNOTA_CI_RELEASE_TOKEN);
+  assert.equal(bindings.length, 1);
+  const verification = bindings[0];
+  assert.equal(verification.run, 'node scripts/verify-mac-in-app.mjs');
+  assert.equal(verification.env.IMNOTA_CI_RELEASE_TOKEN, '${{ github.token }}');
+  assert.equal(verification['continue-on-error'], undefined);
+  const fixtureIndex = job.steps.findIndex((step) => step.run?.includes('extraMetadata.version=0.0.0'));
+  assert.ok(fixtureIndex >= 0 && fixtureIndex < job.steps.indexOf(verification));
+  assert.equal(job.steps[fixtureIndex].env?.IMNOTA_CI_RELEASE_TOKEN, undefined);
+  assert.equal(verification.if, job.steps[fixtureIndex].if);
+  assert.match(verification.if, /matrix\.os == 'macos-latest'/);
+});
+
 test('all successful jobs pass for PRs and main pushes', () => {
   for (const event of ['pull_request', 'push']) {
     assert.deepEqual(qualityGateErrors(successfulNeeds(), event), []);
