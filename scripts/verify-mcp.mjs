@@ -333,6 +333,8 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
             assert.equal(listed.isError, false);
             const collections = JSON.parse(listed.content[0].text).collections;
             assert.equal(collections.length, 2);
+            assert.equal(collections[0].preparedBundlesTotal, 1);
+            assert.equal(collections[0].preparedBundlesTruncated, false);
             const id = collections.find((collection) => collection.id === collectionId).preparedBundles[0].id;
             assert.match(id, /^b_[a-f0-9]{32}$/);
             const inspected = await call('inspect_bundle', { id });
@@ -342,6 +344,13 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
             assert.equal(inspection.sourceKind, 'saved-export');
             assert.equal(inspection.freshness, 'unknown');
             assert.equal(inspection.contentVerified, false);
+            assert.deepEqual(inspection.summary, {
+              bundleCount: 1,
+              imageCount: 1,
+              markdownBytes: Buffer.byteLength(markdown),
+              imageBytes: png.length,
+              sizeMetadataComplete: true,
+            });
             assert.equal(inspection.bundles[0].markdown.bytes, Buffer.byteLength(markdown));
             assert.equal(inspection.bundles[0].image.bytes, png.length);
             assert.deepEqual(inspection.next, { tool: 'get_bundle', arguments: { id } });
@@ -349,6 +358,12 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
               tool: 'get_bundle',
               arguments: { id, bundleNumbers: [1], includeImages: false },
             });
+            const itemList = await call('list_collection_items', { projectPath, collectionId });
+            // This synthetic export fixture has no source items; no action may invent one.
+            assert.deepEqual(JSON.parse(itemList.content[0].text).items, []);
+            const archivedProjects = await call('list_projects', { scope: 'archived' });
+            assert.equal(archivedProjects.isError, false);
+            assert.deepEqual(JSON.parse(archivedProjects.content[0].text).projects, []);
             for (const [name, args] of [
               ['get_bundle', { id }],
               ['get_latest_bundle', {}],
