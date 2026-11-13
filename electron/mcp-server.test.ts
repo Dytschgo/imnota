@@ -549,6 +549,99 @@ describe('prepared MCP bundle discovery and read boundaries', () => {
     expect(JSON.stringify(response)).not.toContain('Old third part');
   });
 
+  it.each(['get_bundle', 'get_latest_bundle'])(
+    '%s refuses a selected Markdown part that disappears before its payload read',
+    async (name) => {
+      const root = await workspace();
+      const projectPath = await writeProject(root, projectData());
+      await writeBundle(projectPath, 'Review - 260913-110000', '# Stale older text');
+      const newest = await writeBundle(projectPath, undefined, '# Selected newest text');
+      const listed = (await callTool(root, 'list_collections', { projectPath })) as CollectionResult;
+      const id = listed.collections[0]!.preparedBundles.find(
+        (set) => set.setName === path.basename(newest),
+      )!.id;
+      const target = path.join(newest, `${path.basename(newest)} - 01.md`);
+      const open = fs.open;
+      let removed = false;
+      vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+        if (String(args[0]) === target && !removed) {
+          await fs.unlink(target);
+          removed = true;
+        }
+        return open(...args);
+      });
+      const response = await protocolCall(toolsFor(root), name, {
+        ...(name === 'get_bundle' ? { id } : { projectPath }),
+        bundleNumbers: [1],
+        includeImages: false,
+      });
+      expect(removed).toBe(true);
+      expect(response.result?.isError).toBe(true);
+      expect(JSON.stringify(response)).not.toContain('Stale older text');
+    },
+  );
+
+  it('refuses a selected export whose Markdown disappears after discovery', async () => {
+    const root = await workspace();
+    const projectPath = await writeProject(root, projectData());
+    await writeBundle(projectPath, 'Review - 260913-110000', '# Stale older text');
+    const newest = await writeBundle(projectPath);
+    const target = path.join(newest, `${path.basename(newest)} - 01.md`);
+    const opendir = fs.opendir;
+    let visits = 0;
+    vi.spyOn(fs, 'opendir').mockImplementation(async (...args) => {
+      // Discovery has already confirmed Markdown on the first visit. Remove it
+      // before the selected export's payload inventory, using the real directory.
+      if (String(args[0]) === newest && ++visits === 2) await fs.unlink(target);
+      return opendir(...args);
+    });
+    const response = await protocolCall(toolsFor(root), 'get_latest_bundle', {
+      projectPath,
+      bundleNumbers: [1],
+    });
+    expect(visits).toBe(2);
+    expect(response.result?.isError).toBe(true);
+    expect(JSON.stringify(response)).not.toContain('Stale older text');
+  });
+
+  it.each(['get_bundle', 'get_latest_bundle'])(
+    '%s reports an image disappearing before its payload read as unavailable',
+    async (name) => {
+      const root = await workspace();
+      const projectPath = await writeProject(root, projectData());
+      const folder = await writeBundle(projectPath, undefined, '# Retained Markdown');
+      const listed = (await callTool(root, 'list_collections', { projectPath })) as CollectionResult;
+      const id = listed.collections[0]!.preparedBundles[0]!.id;
+      const target = path.join(folder, `${path.basename(folder)} - 01.png`);
+      const open = fs.open;
+      let removed = false;
+      vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+        if (String(args[0]) === target && !removed) {
+          await fs.unlink(target);
+          removed = true;
+        }
+        return open(...args);
+      });
+      const response = await protocolCall(
+        toolsFor(root),
+        name,
+        name === 'get_bundle' ? { id } : { projectPath },
+      );
+      expect(removed).toBe(true);
+      expect(response.result?.isError).toBe(false);
+      expect(response.result?.content).toHaveLength(1);
+      const result = JSON.parse(response.result!.content[0]!.text!);
+      expect(result).toMatchObject({
+        imagesIncluded: 0,
+        imagesOmitted: 0,
+        imagesUnavailable: 1,
+        bundles: [{ markdown: '# Retained Markdown', image: 'unavailable' }],
+      });
+      expect(result.bundles[0]).not.toHaveProperty('imageOmissionReason');
+      expect(result.notes.join(' ')).toContain('no longer available');
+    },
+  );
+
   it.each(
     [[], [1, 1], [0], [1000], [1.5], ['1'], '1', Array.from({ length: 101 }, (_, i) => i + 1)].map(
       (bundleNumbers) => ({ bundleNumbers }),

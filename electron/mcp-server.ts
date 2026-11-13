@@ -370,12 +370,16 @@ async function preparedSets(
   return sets;
 }
 
-/** Bounded read of a regular, unlinked file. Returns null when it is larger than the allowance. */
-async function readBoundedImage(target: string, maximumBytes: number): Promise<Buffer | null> {
+type BundleImageRead =
+  { status: 'available'; bytes: Buffer } | { status: 'too-large' } | { status: 'unavailable' };
+
+/** Bounded read of a regular, unlinked file, distinguishing absence from a byte cap. */
+async function readBoundedImage(target: string, maximumBytes: number): Promise<BundleImageRead> {
   try {
-    return await readStableRegularFileBytes(target, maximumBytes);
+    const bytes = await readStableRegularFileBytes(target, maximumBytes);
+    return bytes === null ? { status: 'unavailable' } : { status: 'available', bytes };
   } catch (error) {
-    if (error instanceof FileReadLimitError) return null;
+    if (error instanceof FileReadLimitError) return { status: 'too-large' };
     throw error;
   }
 }
@@ -391,7 +395,8 @@ function isValidPng(png: Buffer): boolean {
   }
 }
 
-type BundleImageStatus = 'included' | 'omitted-too-large' | 'invalid' | 'none' | 'not-requested';
+type BundleImageStatus =
+  'included' | 'omitted-too-large' | 'invalid' | 'none' | 'not-requested' | 'unavailable';
 class BundleSelectionError extends Error {}
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
@@ -477,12 +482,12 @@ async function readPreparedBundle(
   options: BundleReadOptions = {},
 ) {
   const files = await preparedBundleFiles(set);
-  if (!files) return null;
-  const { markdownFiles, pngFiles } = files;
-  if (options.bundleNumbers?.some((number) => !markdownFiles.has(number)))
+  if (options.bundleNumbers?.some((number) => !files?.markdownFiles.has(number)))
     throw new BundleSelectionError(
       'One or more requested bundle numbers are not present in this saved export. Inspect the bundle before selecting parts.',
     );
+  if (!files) return null;
+  const { markdownFiles, pngFiles } = files;
   const selected = options.bundleNumbers ? new Set(options.bundleNumbers) : null;
 
   const images: McpImageContent[] = [];
@@ -491,6 +496,7 @@ async function readPreparedBundle(
   let imageBytes = 0;
   let imagesOmitted = 0;
   let imagesInvalid = 0;
+  let imagesUnavailable = 0;
   let markdownOmitted = 0;
   for (const bundleNumber of [...markdownFiles.keys()].sort((left, right) => left - right)) {
     if (selected && !selected.has(bundleNumber)) continue;
@@ -520,18 +526,24 @@ async function readPreparedBundle(
     else if (pngName) {
       pngPath = await assertContainedFile(set.folder, path.join(set.folder, pngName));
       const allowance = Math.min(limits.maxImageBytes, limits.maxTotalImageBytes - imageBytes);
-      const png = images.length < limits.maxImages ? await readBoundedImage(pngPath, allowance) : null;
-      if (!png) {
+      const png: BundleImageRead =
+        images.length < limits.maxImages
+          ? await readBoundedImage(pngPath, allowance)
+          : { status: 'too-large' };
+      if (png.status === 'unavailable') {
+        image = 'unavailable';
+        imagesUnavailable += 1;
+      } else if (png.status === 'too-large') {
         image = 'omitted-too-large';
         imageOmissionReason = images.length >= limits.maxImages ? 'count-limit' : 'byte-limit';
         imagesOmitted += 1;
-      } else if (!isValidPng(png)) {
+      } else if (!isValidPng(png.bytes)) {
         image = 'invalid';
         imagesInvalid += 1;
       } else {
         image = 'included';
-        imageBytes += png.length;
-        images.push({ type: 'image', data: png.toString('base64'), mimeType: 'image/png' });
+        imageBytes += png.bytes.length;
+        images.push({ type: 'image', data: png.bytes.toString('base64'), mimeType: 'image/png' });
         imageContentIndex = images.length;
       }
     }
@@ -561,6 +573,8 @@ async function readPreparedBundle(
       `Read limits — ${plural(imagesOmitted, 'image', 'images')} omitted (limits per call: ${limits.maxImages} images, ${limits.maxImageBytes} bytes each, ${limits.maxTotalImageBytes} bytes in total). Their pngPath values are listed.`,
     );
   if (imagesInvalid) notes.push(`${plural(imagesInvalid, 'image', 'images')} not returned: not a valid PNG.`);
+  if (imagesUnavailable)
+    notes.push(`${plural(imagesUnavailable, 'image', 'images')} not returned: no longer available.`);
   if (markdownOmitted)
     notes.push(
       `too large — Markdown of ${plural(markdownOmitted, 'prompt', 'prompts')} omitted (limit per call: ${limits.maxMarkdownBytes} bytes). Their markdownPath values are listed.`,
@@ -579,6 +593,7 @@ async function readPreparedBundle(
     imagesIncluded: images.length,
     imagesOmitted,
     imagesInvalid,
+    imagesUnavailable,
     markdownOmitted,
     notes,
   };
@@ -659,8 +674,8 @@ export function createMcpTools(
         const bundle = await readPreparedBundle(set, limits, options);
         if (bundle) return bundle;
       } catch (error) {
-        if (error instanceof BundleSelectionError) throw error;
-        // A removed, linked or unreadable set must not hide a valid saved sibling.
+        if (options.bundleNumbers || error instanceof BundleSelectionError) throw error;
+        // Only ordinary unselected reads may fall back to a readable saved sibling.
       }
     }
     return null;

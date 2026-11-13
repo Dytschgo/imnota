@@ -52,6 +52,8 @@ Paths outside the selected workspace are rejected with the same validators as th
 
 Both bundle readers accept `includeImages: false` for Markdown-only retrieval, without opening PNG payloads, and `bundleNumbers: [1, 3]` to read selected parts in saved numeric order. Selection accepts 1–100 unique integers from 1 to 999; missing parts return an error, including when an older export happens to contain them. Defaults still read the full export with images. Each inspection row supplies a text-only `get_bundle` action for that part.
 
+If a selected part disappears or becomes unreadable during retrieval, the call fails instead of substituting an older export. A PNG that disappears before its payload can be opened is reported as `image: unavailable`, counted in `imagesUnavailable`, and explained in the notes; available Markdown is still returned. This is distinct from a count or byte limit.
+
 Full reads identify `sourceKind: saved-export`, unknown freshness and the filename-local-time timestamp basis. `markdownBytes` counts returned UTF-8 text bytes; omitted Markdown has zero returned bytes and a targeted retry action. That action can recover a part omitted by the shared call budget, but cannot bypass an individual file limit. Images skipped intentionally have `image: not-requested`; actual count/byte omissions carry `imageOmissionReason`. Included images name their zero-based `imageContentIndex` in the MCP content array (JSON metadata occupies index 0).
 
 ## Install a skill or rule
