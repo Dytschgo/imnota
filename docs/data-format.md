@@ -37,6 +37,7 @@ Comparison is optional in schema 3 and 4. Existing projects require no migration
 - `includeInExport` and a manually sortable `position`.
 - Creation/update timestamps, stored filename, dimensions and relative annotation/description paths.
 - An optional conflict marker for externally conflicting copies.
+- An optional `source` object recorded at capture or import while **Record source info** is on: `via` (`capture` or `import`), `capturedAt` (ISO 8601), and optional `app`, `windowTitle`, `url` (http or https only) and `display` (for example `Display 2 of 3`). Text fields are at most 300 characters and the URL at most 2,000. A damaged `source` is dropped when the project is read instead of making the project unreadable. Older Imnota versions ignore the field and drop it if they save that project.
 
 The record's `position` orders screenshots within its collection. Picture numbers are not stored identities: export derives them from the current order. Excluding or reordering a screenshot therefore never changes internal IDs.
 
@@ -55,6 +56,14 @@ Each set has its own timestamped directory. PNG/Markdown pairs are staged togeth
 New export sessions keep a matching ownership journal and timestamp reservation until publication. When starting another export in that collection, the app can remove abandoned staging only after verifying matching records, a stopped owner process, safe paths and no published destination. Foreign, legacy, linked or ambiguous files remain untouched. Existing leftovers without ownership metadata need manual inspection; a filename prefix alone is never permission to delete them. Recent finalized export access is bounded in memory; evicting an old access grant does not delete its published files.
 
 Automatic splitting may produce several pairs. Original Picture numbers continue across pairs. Excluded screenshots stay in project data, do not appear in PNGs and are explicitly recorded in generated Markdown. Prompt outputs are sharing artifacts, not editable project backups; back up the full project folder to retain sources, annotations, descriptions, recovery data and exclusions.
+
+## Superseded failed saves
+
+A failed Markdown or drawing save keeps its active transaction candidate. When the same original item is saved again in the same main-process session, Imnota first stages and validates the replacement. It can then move the witnessed earlier journal intact to `.imnota-transactions/superseded-txn-<id>-<id>/` before writing live candidate files. If an incompletely repaired own save already has the exact requested member bytes, the retry keeps the original item instead of creating a redundant conflict copy. Different requested or foreign bytes, and saves without the ownership witness, retain normal conflict-copy protection. Journal preservation also applies when the retry creates a conflict copy. The original before/after images and manifest are retained byte for byte; these directories are for manual recovery and are never replayed or expired automatically.
+
+Ownership is anchored to the project and journal directory before the failed operation writes live files. After failure, the save request, exact file inventory, identities and hashes are captured and checked again before transfer. If a transfer attempt finds unknown entries, links, changed material or missing ownership, or its move fails, the replacement stops before its live commit. Other active journals for which this session has no failed-operation witness are not transferred; their existing open/recovery checks remain in force. An already removed token can be forgotten without filesystem changes. A newly staged candidate remains available if transfer or the later commit fails.
+
+These witnesses are process-local and bounded to 128 original-item keys with 32 failed attempts each; a journal witness is capped at 512 MiB and uses a 64 KiB hashing buffer. Exceeding a bound preserves the files and reports that ownership could not be recorded. Restart without the original witness retains the existing fail-closed journal rules; stale recovery data may require manual inspection. This is not crash-atomic reconciliation across sessions. Node has no conditional directory rename: a concurrent change after the last check can move with the preserved directory, but this transfer does not delete bytes or rewrite live project files.
 
 ## Local history snapshots
 

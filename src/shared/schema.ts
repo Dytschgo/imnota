@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { screenshotSourceSchema } from './source-context.js';
 import type { ProjectData } from './types.js';
 import type { ContentItem } from './content-items.js';
 import { DEFAULT_EXPORT_PREFERENCES } from './utils.js';
@@ -46,6 +47,8 @@ export const screenshotSchema = z.object({
   originalHeight: z.number().positive(),
   includeInExport: z.boolean().default(true),
   conflict: z.boolean().optional(),
+  // A damaged source record is dropped rather than making the whole project unreadable.
+  source: screenshotSourceSchema.optional().catch(undefined),
 });
 
 const contentItemBaseSchema = z.object({

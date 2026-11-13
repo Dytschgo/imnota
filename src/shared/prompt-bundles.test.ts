@@ -228,6 +228,28 @@ describe('prompt bundle planning', () => {
     expect(result.bundles[0].markdown).not.toContain('Source size: 1600×1200');
   });
 
+  it('writes recorded source info under the picture heading only when present', () => {
+    const input = collection([
+      screenshot('captured', 0, {
+        source: {
+          via: 'capture',
+          capturedAt: '2026-10-10T10:15:00.000Z',
+          app: 'Google Chrome',
+          windowTitle: 'Checkout - Google Chrome',
+        },
+      }),
+      screenshot('plain', 1),
+    ]);
+    const result = planPromptBundles(input, [rendered('captured'), rendered('plain')]);
+    expect(result.kind).toBe('ready');
+    if (result.kind !== 'ready') return;
+    const markdown = result.bundles[0].markdown;
+    expect(markdown).toContain(
+      'Source size: 100×100\n\nSource:\n- App: Google Chrome\n- Window: Checkout - Google Chrome\n- Captured: ',
+    );
+    expect(markdown.match(/^Source:$/gm)).toHaveLength(1);
+  });
+
   it('preserves meaningful Markdown indentation in context, descriptions, and text notes', () => {
     const input = collection([
       screenshot('one', 0, {
@@ -392,12 +414,47 @@ describe('prompt bundle planning', () => {
     expect(redacted.kind).toBe('ready');
     if (redacted.kind !== 'ready') return;
     expect(redacted.bundles[0].markdown).toContain(
-      '### Picture 1 / Marks\n\n- rectangle `r4` at 10.0%,20.0% 30.0%×15.0%',
+      '### Picture 1 / Marks\n\n- rectangle `r4` at 10.0%,20.0% 30.0%×15.0%\n- 2 redacted regions\n',
     );
     expect(redacted.bundles[0].markdown).not.toContain('blur');
     expect(redacted.bundles[0].markdown).not.toContain('pixelate');
-    expect(redacted.bundles[0].markdown).not.toContain('33.0%');
+    expect(redacted.bundles[0].markdown).not.toContain('pixels');
+    // No redaction position or size, in percent or pixels.
+    for (const leaked of [
+      '33.0%',
+      '44.0%',
+      '55.0%',
+      '16.0%',
+      '12.0%',
+      '8.0%',
+      '9.0%',
+      '7.0%',
+      '55×16',
+      '9×7',
+    ])
+      expect(redacted.bundles[0].markdown).not.toContain(leaked);
   });
+
+  it.each(['blur', 'pixelate'] as const)(
+    'lists a %s-only screenshot with a count-only Marks section',
+    (kind) => {
+      const result = planPromptBundles(
+        collection([
+          screenshot('secret', 0, {
+            annotations: [annotation('private-mask', kind, { x: 33, y: 44, width: 55, height: 16 })],
+          }),
+        ]),
+        [rendered('secret')],
+      );
+      expect(result.kind).toBe('ready');
+      if (result.kind !== 'ready') return;
+      const markdown = result.bundles[0].markdown;
+      expect(markdown.split('### Picture 1 / Marks\n\n')[1]?.split('\n\n')[0].trimEnd()).toBe(
+        '- 1 redacted region',
+      );
+      expect(markdown).not.toMatch(/private-mask|\b(?:blur|pixelate)\b|33\.0%|44\.0%|55\.0%|16\.0%/);
+    },
+  );
 
   it('appends Visible text from injected OCR and omits it for redacted screenshots', () => {
     const result = planPromptBundles(collection([screenshot('first', 0, { visibleText: 'Submit order' })]), [

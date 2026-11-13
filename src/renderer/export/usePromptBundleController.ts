@@ -21,6 +21,7 @@ export interface UsePromptBundleControllerOptions {
   rendering?: Partial<PromptBundleControllerRendering>;
   includeMasterOverview?: boolean;
   getIncludeRecognisedText?(): boolean;
+  getIncludeSourceContext?(): boolean;
 }
 
 export interface PromptBundleController {
@@ -47,6 +48,10 @@ export interface PromptBundleController {
   copyImage(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult>;
   openFiles(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult>;
   copyPaths(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult>;
+  copyForTerminal(
+    selection: PromptBundleSelection,
+    wsl?: boolean,
+  ): Promise<PromptBundleControllerActionResult>;
   openFolder(): Promise<PromptBundleControllerActionResult>;
   cancel(): Promise<PromptBundleControllerActionResult>;
   retryCleanup(): Promise<PromptBundleControllerActionResult>;
@@ -80,14 +85,17 @@ function browserBridge(): PromptBundleControllerBridge {
 export function usePromptBundleController(options: UsePromptBundleControllerOptions): PromptBundleController {
   const getSavedContextRef = useRef(options.getSavedContext);
   const getIncludeRecognisedTextRef = useRef(options.getIncludeRecognisedText);
+  const getIncludeSourceContextRef = useRef(options.getIncludeSourceContext);
   const disposalGeneration = useRef(0);
   getSavedContextRef.current = options.getSavedContext;
   getIncludeRecognisedTextRef.current = options.getIncludeRecognisedText;
+  getIncludeSourceContextRef.current = options.getIncludeSourceContext;
   const engineRef = useRef<PromptBundleControllerEngine | undefined>(undefined);
   if (!engineRef.current) {
     engineRef.current = new PromptBundleControllerEngine({
       getSavedContext: () => getSavedContextRef.current(),
       getIncludeRecognisedText: () => getIncludeRecognisedTextRef.current?.() ?? true,
+      getIncludeSourceContext: () => getIncludeSourceContextRef.current?.() ?? false,
       bridge: options.bridge ?? browserBridge(),
       rendering: options.rendering,
       includeMasterOverview: options.includeMasterOverview,
@@ -176,6 +184,8 @@ export function usePromptBundleController(options: UsePromptBundleControllerOpti
         runForBundle(selection, (current) => engine.openFiles(current)),
       copyPaths: (selection: PromptBundleSelection) =>
         runForBundle(selection, (current) => engine.copyPaths(current)),
+      copyForTerminal: (selection: PromptBundleSelection, wsl?: boolean) =>
+        runForBundle(selection, (current) => engine.copyForTerminal(current, wsl)),
       openFolder: () => run(() => engine.openFolder()),
       cancel: () => engine.cancel(),
       retryCleanup: () => engine.retryCleanup(),

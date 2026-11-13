@@ -1,4 +1,13 @@
-import { AlertTriangle, Check, ChevronDown, Copy, FileImage, FileText, FolderOpen } from 'lucide-react';
+import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  Copy,
+  FileImage,
+  FileText,
+  FolderOpen,
+  SquareTerminal,
+} from 'lucide-react';
 import {
   useEffect,
   useId,
@@ -17,7 +26,8 @@ import './prompt-bundles.css';
 export type PromptBundleCardState =
   'idle' | 'preparing' | 'writing' | 'copying' | 'copied' | 'cancelled' | 'error';
 
-export type PromptDeliveryOutcome = 'combined' | 'markdown' | 'image' | 'paths' | 'files' | 'opened';
+export type PromptDeliveryOutcome =
+  'combined' | 'markdown' | 'image' | 'paths' | 'terminal' | 'files' | 'opened';
 
 /** What the last copy put on the clipboard, shown as "Last copied: …". */
 const outcomeLabels: Record<PromptDeliveryOutcome, string> = {
@@ -25,6 +35,7 @@ const outcomeLabels: Record<PromptDeliveryOutcome, string> = {
   markdown: 'Markdown',
   image: 'Image',
   paths: 'File paths',
+  terminal: 'Terminal hand-off',
   files: 'Files',
   opened: 'Files opened',
 };
@@ -79,6 +90,8 @@ export interface PromptBundleCardProps {
   onCopyImage?(request: PromptBundleActionRequest): void | Promise<void>;
   onOpenFiles?(request: PromptBundleActionRequest): void | Promise<void>;
   onCopyPaths?(request: PromptBundleActionRequest): void | Promise<void>;
+  /** `wsl` translates Windows paths for a WSL shell; only offered on Windows. */
+  onCopyForTerminal?(request: PromptBundleActionRequest, wsl: boolean): void | Promise<void>;
   onLoadPreview?(request: PromptBundleActionRequest): void | Promise<void>;
 }
 
@@ -152,6 +165,7 @@ export function PromptBundleCard({
   onCopyImage,
   onOpenFiles,
   onCopyPaths,
+  onCopyForTerminal,
   onLoadPreview,
 }: PromptBundleCardProps) {
   const [optionsOpen, setOptionsOpen] = useState(false);
@@ -532,6 +546,24 @@ export function PromptBundleCard({
                 >
                   <Copy size={14} aria-hidden="true" /> Copy file paths
                 </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!onCopyForTerminal}
+                  onClick={() => runOption((target) => onCopyForTerminal?.(target, false))}
+                >
+                  <SquareTerminal size={14} aria-hidden="true" /> Copy for terminal
+                </button>
+                {platform === 'windows' && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!onCopyForTerminal}
+                    onClick={() => runOption((target) => onCopyForTerminal?.(target, true))}
+                  >
+                    <SquareTerminal size={14} aria-hidden="true" /> Copy for terminal (WSL paths)
+                  </button>
+                )}
                 <button
                   type="button"
                   role="menuitem"

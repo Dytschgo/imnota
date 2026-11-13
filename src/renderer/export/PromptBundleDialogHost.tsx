@@ -33,6 +33,7 @@ export interface PromptBundleUiController {
   copyImage(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
   openFiles(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
   copyPaths(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
+  copyForTerminal(selection: PromptBundleActionRequest, wsl?: boolean): Promise<PromptActionResult>;
   openFolder(): Promise<PromptActionResult>;
   cancel(): Promise<PromptActionResult>;
   loadPreview(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
@@ -104,6 +105,7 @@ export function PromptBundleDialogHost({
         onCopyImage={(selection) => run(controller.copyImage(selection))}
         onOpenFiles={(selection) => run(controller.openFiles(selection))}
         onCopyPaths={(selection) => run(controller.copyPaths(selection))}
+        onCopyForTerminal={(selection, wsl) => run(controller.copyForTerminal(selection, wsl))}
         onOpenExportFolder={() => run(controller.openFolder())}
         onCancel={() => run(controller.cancel())}
         onRebuild={() => run(controller.prepareFreshFiles())}

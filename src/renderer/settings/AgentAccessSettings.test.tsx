@@ -18,7 +18,10 @@ it('announces clipboard failure and allows retry with the same setup prompt', as
   fireEvent.click(screen.getByRole('button', { name: 'Copy prompt' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('Could not copy. Try again, or select and copy');
   expect(screen.queryByRole('button', { name: 'Copied' })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Copy prompt' }));
+  expect(screen.getByRole('status')).toHaveTextContent(
+    'Setup prompt could not be copied. Select the text and copy it instead.',
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Copy failed' }));
   await screen.findByRole('button', { name: 'Copied' });
   expect(screen.getByRole('status')).toHaveTextContent('Setup prompt copied to clipboard.');
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();

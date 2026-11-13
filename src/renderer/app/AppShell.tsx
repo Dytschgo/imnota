@@ -160,7 +160,10 @@ export function AppShell({
             )}
           </div>
           <div className="crumbs">
-            <span className="crumb-muted">
+            <span
+              className="crumb-muted"
+              title={store.view !== 'settings' && store.snapshot ? store.snapshot.project.name : undefined}
+            >
               {store.view === 'settings'
                 ? 'Settings'
                 : store.snapshot

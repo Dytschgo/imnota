@@ -1484,9 +1484,12 @@ export function AnnotationCanvas({
       <div className="canvas-assistive-text" aria-live="polite" data-testid="annotation-canvas-status">
         {describeSelectedAnnotation(annotations, selectedId)}
       </div>
+      {/* Each tip stays on one line; narrow canvases keep only the two pointer tips. */}
       <div className="canvas-hint" hidden={cropping}>
-        Drag empty space to pan · Double-click screenshot for text · Shift+Enter for a new line · 0 fit · 1
-        actual size
+        <span>Drag empty space to pan</span>
+        <span>Double-click screenshot for text</span>
+        <span className="canvas-hint-secondary">Shift+Enter for a new line</span>
+        <span className="canvas-hint-secondary">0 fit · 1 actual size</span>
       </div>
     </div>
   );

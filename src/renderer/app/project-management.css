@@ -4,32 +4,49 @@
   padding: 0;
 }
 
+.library-search-row {
+  display: flex;
+  gap: 8px;
+  margin-block-end: 16px;
+}
+
+.library-search-row > .search-line {
+  min-inline-size: 0;
+  flex: 1;
+  margin-block-end: 0;
+}
+
 .library-search-trigger {
-  width: 100%;
-  justify-content: flex-start;
+  block-size: 40px;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  padding-inline: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--ink-2);
   font: inherit;
-  text-align: left;
+  font-size: 12px;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.library-search-trigger:hover {
-  border-color: var(--line-strong);
-  background: var(--surface-2);
-  color: var(--ink-2);
+@media (hover: hover) and (pointer: fine) {
+  .library-search-trigger:hover {
+    border-color: var(--line-strong);
+    color: var(--ink);
+  }
+}
+
+.library-search-trigger:active {
+  background: var(--surface-3);
 }
 
 .library-search-trigger:focus-visible {
-  outline: 0;
-  border-color: color-mix(in srgb, var(--imnota-accent) 65%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--imnota-accent) 13%, transparent);
-}
-
-.search-line.library-search-trigger > span {
-  overflow: hidden;
-  color: var(--ink-3);
-  font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  outline: 2px solid var(--imnota-accent-hover);
+  outline-offset: 2px;
 }
 
 .project-row-main {
@@ -82,11 +99,10 @@
   border: 0;
 }
 
+/* Uses .field-label, like Project name and Description above it. */
 .project-icon-picker legend {
-  margin-bottom: 8px;
-  color: var(--ink-2);
-  font-size: 12px;
-  font-weight: 600;
+  margin-block-end: 6px;
+  padding: 0;
 }
 
 .project-icon-picker > div {

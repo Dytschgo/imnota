@@ -7,7 +7,9 @@ import {
 } from '../../shared/recently-deleted';
 import type { Collection } from '../../shared/types';
 import { Button, Modal } from '../components/ui';
+import { reasonMessage } from '../user-facing-error';
 import { collectionDisplayName } from './collection-display-name';
+import { textBlockLabel } from './text-block-label';
 
 const KIND = {
   screenshot: { label: 'Screenshot', icon: FileImage },
@@ -25,9 +27,18 @@ export interface RecentlyDeletedProps {
   onRestore(item: RecentlyDeletedItem): Promise<RecentlyDeletedRestoreResult>;
 }
 
+/** Date and minute are enough to recognise a deletion; the exact instant stays in `dateTime`. */
+const DELETED_TIME_FORMAT: Intl.DateTimeFormatOptions = { dateStyle: 'medium', timeStyle: 'short' };
+
 function deletedTime(value: string): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'at an unknown time' : date.toLocaleString();
+  return Number.isNaN(date.getTime())
+    ? 'at an unknown time'
+    : date.toLocaleString(undefined, DELETED_TIME_FORMAT);
+}
+
+function itemTitle(item: RecentlyDeletedItem): string {
+  return item.kind === 'text' ? textBlockLabel(item.title) : item.title;
 }
 
 /** Rail entry point and dialog for restoring items whose delete journal is still kept. */
@@ -84,7 +95,7 @@ function RecentlyDeletedDialog({
     } catch (reason) {
       if (!mounted.current || generation !== loadGeneration.current) return;
       setItems([]);
-      setError(reason instanceof Error ? reason.message : 'Recently deleted items could not be listed.');
+      setError(reasonMessage(reason, 'Recently deleted items could not be listed.'));
     }
   }, [projectPath]);
 
@@ -111,7 +122,7 @@ function RecentlyDeletedDialog({
     try {
       outcome = await onRestore(item);
     } catch (reason) {
-      outcome = reason instanceof Error ? reason.message : 'The item could not be restored.';
+      outcome = reasonMessage(reason, 'The item could not be restored.');
     }
     if (!mounted.current) return;
     // The journal is the source of truth for what can still be restored.
@@ -120,8 +131,8 @@ function RecentlyDeletedDialog({
     setRestoring(null);
     const failure = typeof outcome === 'string' ? outcome : null;
     const warning = outcome && typeof outcome === 'object' ? outcome.warning : '';
-    if (failure) setError(`Restore could not be completed for “${item.title}”. ${failure}`);
-    else setStatus([`Restored “${item.title}”.`, warning].filter(Boolean).join(' '));
+    if (failure) setError(`Restore could not be completed for “${itemTitle(item)}”. ${failure}`);
+    else setStatus([`Restored “${itemTitle(item)}”.`, warning].filter(Boolean).join(' '));
     setFocusRequest({ undoToken: failure ? item.undoToken : null });
   }
 
@@ -168,13 +179,14 @@ function RecentlyDeletedDialog({
               const kind = KIND[item.kind];
               const Icon = kind.icon;
               const collection = collectionName(item.collectionId);
+              const title = itemTitle(item);
               return (
                 <li key={item.undoToken} data-testid={`recently-deleted-${item.itemId}`}>
                   <span className="recently-deleted-icon">
                     <Icon size={16} aria-hidden="true" />
                   </span>
                   <span className="recently-deleted-copy">
-                    <strong title={item.title}>{item.title}</strong>
+                    <strong title={title}>{title}</strong>
                     <small>
                       {kind.label}
                       {collection ? ` · ${collection}` : ''} · Deleted{' '}
@@ -187,7 +199,7 @@ function RecentlyDeletedDialog({
                       else restoreButtons.current.delete(item.undoToken);
                     }}
                     variant="soft"
-                    aria-label={`Restore ${kind.label.toLowerCase()}: ${item.title}`}
+                    aria-label={`Restore ${kind.label.toLowerCase()}: ${title}`}
                     busy={restoring === item.undoToken}
                     disabled={restoring !== null}
                     onClick={() => void restore(item)}

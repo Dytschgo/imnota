@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProjectSearchResponse } from '../../shared/project-search';
+import type { ProjectSearchInput, ProjectSearchResponse } from '../../shared/project-search';
 import type { ImnotaBridge } from '../../shared/types';
 import { SearchDialog } from './SearchDialog';
 
@@ -95,6 +95,44 @@ describe('SearchDialog', () => {
     expect(onOpenResult).toHaveBeenCalledWith(
       expect.objectContaining({ itemId: 'shot-one', annotationId: 'annotation-one' }),
     );
+  });
+
+  it('names a text result without its Markdown heading marker', async () => {
+    setSearch(async ({ query }) => {
+      const result = response(query, '# Search fixture');
+      result.results[0] = { ...result.results[0], kind: 'text' };
+      return result;
+    });
+    render(<SearchDialog open onClose={vi.fn()} onOpenResult={vi.fn()} />);
+    fireEvent.change(screen.getByTestId('global-search-input'), { target: { value: 'fixture' } });
+    await act(async () => vi.advanceTimersByTime(180));
+    expect(screen.getByTestId('global-search-result')).toHaveTextContent(/^Search fixtureText/);
+  });
+
+  it('offers the other location after no matches and keeps focus in the search field', async () => {
+    const searchProjects = vi.fn(
+      async ({ query, scope = 'active' }: ProjectSearchInput): Promise<ProjectSearchResponse> => ({
+        ...response(query),
+        scope,
+        results: scope === 'archived' ? response(query).results : [],
+      }),
+    );
+    setSearch(searchProjects);
+    const onScopeChange = vi.fn();
+    render(<SearchDialog open onClose={vi.fn()} onOpenResult={vi.fn()} onScopeChange={onScopeChange} />);
+    const input = screen.getByTestId('global-search-input');
+    fireEvent.change(input, { target: { value: 'old receipt' } });
+    await act(async () => vi.advanceTimersByTime(180));
+    expect(screen.getByText('No matches in active projects.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Search the archive' }));
+    expect(onScopeChange).toHaveBeenCalledWith('archived');
+    expect(input).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Archive' })).toHaveAttribute('aria-pressed', 'true');
+    await act(async () => vi.advanceTimersByTime(180));
+    expect(searchProjects).toHaveBeenLastCalledWith({ query: 'old receipt', scope: 'archived', limit: 50 });
+    expect(screen.getByTestId('global-search-result')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Search the archive' })).not.toBeInTheDocument();
   });
 
   it('does not let an earlier open action close a reopened dialog', async () => {

@@ -61,6 +61,16 @@ test('theme changes stay display-only and edits retain source background and sha
   expect(onChange).toHaveBeenCalledTimes(1);
 });
 
+test('the group hint names only this platform’s shortcut', () => {
+  // jsdom reports no macOS platform, so the hint uses Ctrl like Windows and Linux.
+  render(
+    <DrawingEditor source={JSON.stringify({ elements: [], appState: {} })} theme="dark" onChange={vi.fn()} />,
+  );
+  const hint = screen.getByText('Group: Ctrl + G');
+  expect(hint).toHaveAttribute('title', 'Select shapes and press Ctrl + G to group');
+  expect(hint.textContent).not.toContain('⌘');
+});
+
 test('drawing tools wait for the engine and the first enabled click reaches it', () => {
   render(
     <DrawingEditor source={JSON.stringify({ elements: [], appState: {} })} theme="dark" onChange={vi.fn()} />,
