@@ -926,7 +926,7 @@ export async function exerciseRegionCapture(
   await waitForClosed(trayOverlay, 'Queued tray capture overlay');
   await waitForAllCaptureOverlaysClosed(reopenedFromTray, 'Queued tray capture');
 
-  await driver.evaluate(`(async () => {
+  await new NativeUiDriver(reopenedFromTray).evaluate(`(async () => {
     const result=await window.imnota.setPreferenceSettings({promptExport:{includeSourceContext:false}});
     if(!result.ok) throw new Error(result.error.message);
   })()`);
