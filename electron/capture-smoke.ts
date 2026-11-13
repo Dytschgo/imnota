@@ -936,7 +936,6 @@ export async function exerciseRegionCapture(
   await waitForClosed(trayOverlay, 'Queued tray capture overlay');
   await waitForAllCaptureOverlaysClosed(reopenedFromTray, 'Queued tray capture');
 
-  const driver = new NativeUiDriver(reopenedFromTray);
   const windowSource = await withSourceWindowFixture(async (title) => {
     const driver = new NativeUiDriver(reopenedFromTray);
     let candidate: CaptureWindowCandidate | undefined;
