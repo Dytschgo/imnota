@@ -25,6 +25,41 @@ afterEach(async (context) => {
   }
 });
 
+it('suppresses a native drawing Restore event before parent sync completes', async () => {
+  const held: { target?: string } = {};
+  let enter!: () => void;
+  let release!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  const barrier = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const f = await fixture('drawing', {
+    beforeParentSync: async (file) => {
+      if (file === held.target) {
+        enter();
+        await barrier;
+      }
+    },
+  });
+  target = path.join(
+    f.projectPath,
+    f.members.find((member) => member.endsWith('.png'))!,
+  );
+  const restoring = f.restore();
+  void restoring.catch(() => undefined);
+  try {
+    await entered;
+    await waitFor(() => expect(f.flushed).toHaveBeenCalled());
+    await Promise.all(f.flushed.mock.results.map((result) => result.value));
+    expect(f.events).toEqual([]);
+  } finally {
+    release();
+    await restoring;
+  }
+});
+
 it.each(cases)(
   'repairs a per-member $kind $code failure without reporting whole Restore success',
   async ({ kind, code }) => {

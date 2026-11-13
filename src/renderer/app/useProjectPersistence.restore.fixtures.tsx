@@ -13,6 +13,7 @@ import { registerScreenshotIpc } from '../../../electron/ipc-screenshots';
 import { ProjectWatchManager, projectRevisionForSource } from '../../../electron/project-watch';
 import { writeApplicationFile } from '../../../electron/application-persistence';
 import { PersistenceDiagnostics } from '../../../electron/persistence-diagnostics';
+import type { AtomicWriteVerification } from '../../../electron/files';
 import { WorkspaceContentSearch } from '../../../electron/content-search';
 import { workflowOutcome } from '../../../electron/workflow-errors';
 import type { IpcHost } from '../../../electron/main';
@@ -36,7 +37,7 @@ export function fault(target: string, code: string) {
 
 export function fixture(
   kind: 'screenshot' | 'text' | 'drawing',
-  options: { holdWatchEvents?: boolean } = {},
+  options: { holdWatchEvents?: boolean; beforeParentSync?: AtomicWriteVerification['beforeParentSync'] } = {},
 ) {
   const owner = ledger();
   return owner.span('fixture construction', () => buildFixture(owner, kind, options));
@@ -45,7 +46,7 @@ export function fixture(
 async function buildFixture(
   ledger: PersistenceLedger,
   kind: 'screenshot' | 'text' | 'drawing',
-  options: { holdWatchEvents?: boolean },
+  options: { holdWatchEvents?: boolean; beforeParentSync?: AtomicWriteVerification['beforeParentSync'] },
 ) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-restore-')));
   ledger.own(root, 'imnota-restore-');
@@ -111,6 +112,7 @@ async function buildFixture(
         diagnostics,
         recordSelfWrite: published,
         invalidate: invalidated,
+        verification: { beforeParentSync: options.beforeParentSync },
       }),
     ),
   );
@@ -200,6 +202,7 @@ async function buildFixture(
   });
   const watch = manager;
   trackWatch(ledger, watch);
+  const flushed = vi.spyOn(watch as unknown as { flush: (...args: unknown[]) => Promise<void> }, 'flush');
   ledger.stop(() => watch.stopAll());
   const bridge = {
     startProjectWatch: async () =>
@@ -251,6 +254,7 @@ async function buildFixture(
     search,
     root,
     watchedReads,
+    flushed,
     projectPath,
     projectFile,
     readProject,
