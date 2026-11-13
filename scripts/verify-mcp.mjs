@@ -409,7 +409,14 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
             assert.deepEqual(JSON.parse(itemList.content[0].text).items, []);
             const archivedProjects = await call('list_projects', { scope: 'archived' });
             assert.equal(archivedProjects.isError, false);
-            assert.deepEqual(JSON.parse(archivedProjects.content[0].text).projects, []);
+            assert.deepEqual(JSON.parse(archivedProjects.content[0].text).projects, [
+              {
+                path: archivedPath,
+                name: archivedProject.name,
+                status: 'archived',
+                updatedAt: archivedProject.updatedAt,
+              },
+            ]);
             for (const [name, args] of [
               ['get_bundle', { id }],
               ['get_latest_bundle', {}],
