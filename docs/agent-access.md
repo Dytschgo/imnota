@@ -13,20 +13,22 @@ Until the toggle is on, Imnota starts no listener and a `--mcp` process exits im
 
 The HTTP listener binds only to `http://127.0.0.1:17384/mcp`. It is not a public server. The existing interface has no authentication token: enabling it allows local processes to read the selected workspace. Requests with a foreign Host or a browser Origin are rejected; no CORS permission is granted. Hosted-share tokens do not authorize MCP access.
 
+HTTP responses disable caching. Accepted notifications return an empty `202`; unsupported methods return `405` with `Allow: POST`, and oversized bodies return `413`. The server closes refused connections; a client still uploading after an early size refusal can observe a connection reset instead of exposing that response. Malformed JSON or UTF-8 returns a JSON-RPC parse error. Stdio also rejects malformed UTF-8, bounds unfinished request lines, recovers after an oversized line, and waits for response writes before consuming another request. Tool discovery marks tools as read-only, idempotent and local; annotations are hints, not additional access rights. Client `_meta` on tool calls is accepted separately from tool arguments.
+
 Enabling access first checks that the listener can bind. If the port is occupied, Settings reports the failure and leaves access off. A failed settings write closes a newly started listener. If a later app launch cannot bind, Imnota disables access and explains how to retry. Disabling access stops the listener and rejects further requests.
 
 ## What agents can read
 
-| Tool                    | Arguments                              | Result                                                                           |
-| ----------------------- | -------------------------------------- | -------------------------------------------------------------------------------- |
-| `list_projects`         | None                                   | Active projects (path, name, updated time)                                       |
-| `list_collections`      | `projectPath`                          | Collections, including archived ones, and up to ten recent saved bundle ids each |
-| `list_collection_items` | `projectPath`, `collectionId`          | Ordered items (id, kind, title, includeInExport, priority)                       |
-| `get_latest_bundle`     | Optional `projectPath`, `collectionId` | Latest readable saved export: Markdown text and PNG image blocks                 |
-| `get_bundle`            | `id`                                   | One saved export identified by a discovered bundle id                            |
-| `inspect_bundle`        | `id`                                   | Ordered saved file sizes and read limits, without reading Markdown or PNG bodies |
-| `get_item`              | `projectPath`, `itemId`                | One item's Markdown plus image path for screenshots and drawings                 |
-| `search_saved_text`     | `query`, optional search filters       | Existing saved-text search results                                               |
+| Tool                    | Arguments                               | Result                                                                           |
+| ----------------------- | --------------------------------------- | -------------------------------------------------------------------------------- |
+| `list_projects`         | Optional `scope`: active, archived, all | Projects in the chosen scope; active by default (path, name, updated time)       |
+| `list_collections`      | `projectPath`                           | Collections, including archived ones, and up to ten recent saved bundle ids each |
+| `list_collection_items` | `projectPath`, `collectionId`           | Ordered items (id, kind, title, includeInExport, priority)                       |
+| `get_latest_bundle`     | Optional `projectPath`, `collectionId`  | Latest readable saved export: Markdown text and PNG image blocks                 |
+| `get_bundle`            | `id`                                    | One saved export identified by a discovered bundle id                            |
+| `inspect_bundle`        | `id`                                    | Ordered saved file sizes and read limits, without reading Markdown or PNG bodies |
+| `get_item`              | `projectPath`, `itemId`                 | One item's Markdown plus image path for screenshots and drawings                 |
+| `search_saved_text`     | `query`, optional search filters        | Existing saved-text search results                                               |
 
 `get_latest_bundle` without arguments searches active projects and active collections. Supplying only `projectPath` narrows it to that project's active collections; supplying both `projectPath` and `collectionId` selects that collection, including an archived one. `collectionId` alone is invalid. Timestamp ties use a stable project-path, collection-id and folder-name order.
 
@@ -43,6 +45,18 @@ The first MCP content block is JSON text with bundle metadata and ordered `bundl
 Per call, bundle reads return at most **10 PNGs**, **5,000,000 raw bytes per PNG**, **20,000,000 raw image bytes in total**, and **4,000,000 raw Markdown bytes**. Oversized content is omitted with its saved path, status, counts and explanatory `notes`; invalid images are also reported. JSON text responses are capped at **5,000,000 UTF-8 bytes**. A response exceeding that cap returns a tool error instead of a partial JSON document. Requests are capped at **1,000,000 bytes** (stdio checks each received line). Directory scans stop at **5,000 entries** per directory; narrow large workspace requests to a project. These limits do not write or regenerate files.
 
 Paths outside the selected workspace are rejected with the same validators as the desktop IPC bridge. Linked project or export paths are rejected, and reads recheck file identity and size. Recovery journals, backup archives, and hosted-share pairing or management secrets are not exposed. MCP performs no migrations, recovery, capture, export generation or file writes. Access remains controlled by the explicit local opt-in. HTTP uses the running UI's settings. Before each stdio tool call, the existing session reads `settings.json` once and validates it using the shared settings schemas: access off refuses the call, and a changed workspace takes effect for that call. Missing, unreadable or malformed settings fail closed rather than retaining enabled access. Invalid workspace values cannot authorize a root. This does not cancel a read already in progress; initialization and tool discovery do not read workspace content.
+
+`search_saved_text` includes saved drawing descriptions as well as titles, screenshot descriptions and Markdown text. A whitespace-only query is rejected before scanning; use at least one non-whitespace search term.
+
+## Selective saved bundle reads
+
+Discovery reports its limits explicitly. Each collection includes `preparedBundlesTotal` and `preparedBundlesTruncated`; the returned window is still the ten most recent recognized exports. Listed exports carry the same saved-export / filename-local-time / unknown-freshness fields as full reads. `inspect_bundle.summary` reports observed part/image counts and aggregate Markdown/image file bytes; a byte total is `null` if any contributing size is unavailable or the sum cannot be represented safely. `sizeMetadataComplete` refers only to these size observations, never content integrity or freshness. Item listings supply `get_item` actions, which recheck opt-in and workspace authorization when followed. Use `list_projects` with `scope: "archived"` or `scope: "all"` to browse archived projects explicitly.
+
+Both bundle readers accept `includeImages: false` for Markdown-only retrieval, without opening PNG payloads, and `bundleNumbers: [1, 3]` to read selected parts in saved numeric order. Selection accepts 1–100 unique integers from 1 to 999; missing parts return an error, including when an older export happens to contain them. Defaults still read the full export with images. Each inspection row supplies a text-only `get_bundle` action for that part.
+
+If a selected part disappears or becomes unreadable during retrieval, the call fails instead of substituting an older export. A PNG that disappears before its payload can be opened is reported as `image: unavailable`, counted in `imagesUnavailable`, and explained in the notes; available Markdown is still returned. This is distinct from a count or byte limit.
+
+Full reads identify `sourceKind: saved-export`, unknown freshness and the filename-local-time timestamp basis. `markdownBytes` counts returned UTF-8 text bytes; omitted Markdown has zero returned bytes and a targeted retry action. That action can recover a part omitted by the shared call budget, but cannot bypass an individual file limit. Images skipped intentionally have `image: not-requested`; actual count/byte omissions carry `imageOmissionReason`. Included images name their zero-based `imageContentIndex` in the MCP content array (JSON metadata occupies index 0).
 
 ## Install a skill or rule
 

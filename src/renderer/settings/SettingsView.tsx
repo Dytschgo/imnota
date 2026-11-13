@@ -1,6 +1,6 @@
 import { isCommittedWriteWarning } from '../../shared/write-outcome';
 import { refreshCommittedSettings } from './sharing-preferences';
-import { ArrowLeft, Copy, FolderOpen, Grid2X2, History, Info, Keyboard, Monitor, Users } from 'lucide-react';
+import { ArrowLeft, FolderOpen, Grid2X2, History, Info, Keyboard, Monitor, Users } from 'lucide-react';
 import { useState } from 'react';
 import type { EffectiveAppearance } from '../app/useAppearance';
 import { Button } from '../components/ui';
@@ -10,13 +10,8 @@ import { useAppStore } from '../store';
 import { AppearanceSettings } from './AppearanceSettings';
 import { OnboardingSettings } from './OnboardingSettings';
 import type { PreferenceSettings } from './preferences';
-import {
-  agentAccessSetupPrompt,
-  DEFAULT_PREFERENCE_SETTINGS,
-  localAgentAccessHttpSnippet,
-  localAgentAccessStdioSnippet,
-  localAgentAccessUrl,
-} from './preferences';
+import { DEFAULT_PREFERENCE_SETTINGS } from './preferences';
+import { AgentAccessSettings } from './AgentAccessSettings';
 import { ShortcutSettings } from './ShortcutSettings';
 import {
   describeCommonShortcut,
@@ -423,111 +418,6 @@ export function SettingsView({
         </div>
         {group === 'Sharing' && <SharingSettings />}
       </div>
-    </section>
-  );
-}
-
-type CopyTarget = 'prompt' | 'http' | 'stdio';
-const COPY_TARGET_NAMES: Record<CopyTarget, string> = {
-  prompt: 'Setup prompt',
-  http: 'HTTP configuration',
-  stdio: 'Stdio configuration',
-};
-
-function AgentAccessSettings({
-  value,
-  disabled,
-  onChange,
-}: {
-  value: PreferenceSettings['agentAccess'];
-  disabled: boolean;
-  onChange(value: PreferenceSettings['agentAccess']): void | Promise<void>;
-}) {
-  const [copy, setCopy] = useState<{ label: CopyTarget; ok: boolean } | null>(null);
-  const copySnippet = async (label: CopyTarget, snippet: string) => {
-    try {
-      await window.imnota.copyText(snippet);
-      setCopy({ label, ok: true });
-    } catch {
-      // A failed copy used to look like nothing happened; say so and keep the text selectable.
-      setCopy({ label, ok: false });
-    }
-  };
-  const copyLabel = (label: CopyTarget, idle: string) =>
-    copy?.label === label ? (copy.ok ? 'Copied' : 'Copy failed') : idle;
-  return (
-    <section className="settings-section" aria-labelledby="agent-access-title">
-      <p className="sr-only" role="status">
-        {copy
-          ? copy.ok
-            ? `${COPY_TARGET_NAMES[copy.label]} copied.`
-            : `${COPY_TARGET_NAMES[copy.label]} could not be copied. Select the text and copy it instead.`
-          : ''}
-      </p>
-      <h2 id="agent-access-title">
-        MCP access <span className="feature-status beta">Beta</span>
-      </h2>
-      <label className="settings-switch">
-        <span>
-          <strong>Allow local agent access</strong>
-          <small>
-            Lets a coding agent read prepared prompt bundles from this workspace over MCP. Off by default. The
-            listener binds only to {localAgentAccessUrl()} or a spawned <kbd>--mcp</kbd> stdio process. Imnota
-            does not write any editor or agent configuration.
-          </small>
-        </span>
-        <input
-          type="checkbox"
-          checked={value.enabled}
-          disabled={disabled}
-          data-testid="agent-access-toggle"
-          onChange={(event) => void onChange({ enabled: event.target.checked })}
-        />
-      </label>
-      <div className="settings-snippet">
-        <div className="settings-snippet-heading">
-          <strong>Setup prompt for any agent</strong>
-          <Button variant="ghost" onClick={() => void copySnippet('prompt', agentAccessSetupPrompt())}>
-            <Copy size={14} aria-hidden="true" />
-            {copyLabel('prompt', 'Copy prompt')}
-          </Button>
-        </div>
-        <p className="settings-snippet-note">
-          Paste this into whichever agent you use. It contains the transport, the tool list, and the
-          instruction to write its own MCP configuration.
-        </p>
-        <pre data-testid="agent-access-prompt">{agentAccessSetupPrompt()}</pre>
-      </div>
-      <details className="settings-disclosure">
-        <summary>Configuration reference</summary>
-        <p className="settings-snippet-note">
-          Generic <code>mcpServers</code> entries, if you prefer to edit the configuration yourself.
-        </p>
-        <div className="settings-snippet">
-          <div className="settings-snippet-heading">
-            <strong>HTTP</strong>
-            <Button variant="ghost" onClick={() => void copySnippet('http', localAgentAccessHttpSnippet())}>
-              <Copy size={14} aria-hidden="true" />
-              {copyLabel('http', 'Copy')}
-            </Button>
-          </div>
-          <pre>{localAgentAccessHttpSnippet()}</pre>
-        </div>
-        <div className="settings-snippet">
-          <div className="settings-snippet-heading">
-            <strong>Stdio</strong>
-            <Button variant="ghost" onClick={() => void copySnippet('stdio', localAgentAccessStdioSnippet())}>
-              <Copy size={14} aria-hidden="true" />
-              {copyLabel('stdio', 'Copy')}
-            </Button>
-          </div>
-          <pre>{localAgentAccessStdioSnippet()}</pre>
-        </div>
-        <p className="settings-snippet-note">
-          Optional skill and rule files are in the documentation. Imnota never writes agent configuration for
-          you.
-        </p>
-      </details>
     </section>
   );
 }

@@ -79,7 +79,7 @@
   --ink-3: #545b6a;
   --ink-4: #5c6472;
   --text-cyan: #0369a1;
-  --text-success: #15803d;
+  --text-success: oklch(0.46 0.11 150);
   --line: rgba(18, 20, 26, 0.15);
   --line-strong: rgba(18, 20, 26, 0.24);
   --indigo-light: #4e3ee6;
@@ -2482,30 +2482,6 @@ button.icon-button.new-collection-button svg {
   .whats-new-card.has-image {
     grid-template-columns: minmax(0, 1fr);
   }
-}
-.terminal-update-command {
-  width: 100%;
-  color: var(--ink-2);
-  font-size: 12px;
-}
-.terminal-update-command > p {
-  margin: 0 0 7px;
-}
-.terminal-update-command > div {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.terminal-update-command code {
-  min-width: 0;
-  flex: 1;
-  overflow: auto;
-  padding: 7px 8px;
-  border-radius: 6px;
-  background: var(--surface-3);
-  color: var(--ink);
-  font-size: 11px;
-  white-space: nowrap;
 }
 .modal-actions {
   display: flex;

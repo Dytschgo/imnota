@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import { createElectronEnvironment, forwardedSignals, launchElectron } from './dev-electron.mjs';
@@ -71,6 +72,51 @@ test('launches Electron with the sanitized environment and inherited stdio', () 
     },
   });
 });
+
+test('removes all Windows spellings without mutating the source environment', () => {
+  const source = {
+    ELECTRON_RUN_AS_NODE: '1',
+    electron_run_as_node: '1',
+    Electron_Run_As_Node: '1',
+    ELECTRON_RUN_AS_NODE_EXTRA: 'kept',
+    Path: 'kept',
+  };
+  const original = { ...source };
+  assert.deepEqual(createElectronEnvironment(source, 'win32'), {
+    ELECTRON_RUN_AS_NODE_EXTRA: 'kept',
+    Path: 'kept',
+  });
+  assert.deepEqual(source, original);
+});
+
+test('preserves case-distinct POSIX environment variables', () => {
+  for (const platform of ['linux', 'darwin']) {
+    assert.deepEqual(
+      createElectronEnvironment({ ELECTRON_RUN_AS_NODE: '1', electron_run_as_node: 'kept' }, platform),
+      { electron_run_as_node: 'kept' },
+    );
+  }
+});
+
+test(
+  'a Windows child cannot inherit Node mode through a differently cased key',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const probe = ['-p', 'process.env.ELECTRON_RUN_AS_NODE ?? "absent"'];
+    const environment = { ...process.env, electron_run_as_node: '1' };
+    delete environment.ELECTRON_RUN_AS_NODE;
+    const before = spawnSync(process.execPath, probe, { env: environment, encoding: 'utf8' });
+    assert.equal(before.status, 0, before.stderr);
+    assert.equal(before.stdout.trim(), '1');
+
+    const after = spawnSync(process.execPath, probe, {
+      env: createElectronEnvironment(environment),
+      encoding: 'utf8',
+    });
+    assert.equal(after.status, 0, after.stderr);
+    assert.equal(after.stdout.trim(), 'absent');
+  },
+);
 
 test('forwards terminal signals to Electron and mirrors its exit code', () => {
   const harness = createHarness();
