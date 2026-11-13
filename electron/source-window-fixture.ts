@@ -36,10 +36,12 @@ export async function withSourceWindowFixture<T>(
           '-Command',
           `
       Add-Type -AssemblyName System.Windows.Forms
+          Add-Type 'using System; using System.Runtime.InteropServices; public static class ImnotaSourceFixture { [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command); }'
       $form = New-Object System.Windows.Forms.Form
       $form.Text = '${title}'
       $form.Width = 360; $form.Height = 220
       $form.StartPosition = 'CenterScreen'
+          $form.Add_Shown({ [ImnotaSourceFixture]::ShowWindow($form.Handle, 1) | Out-Null; $form.Activate() })
       $timer = New-Object System.Windows.Forms.Timer
       $timer.Interval = 120000
       $timer.Add_Tick({ $form.Close() }); $timer.Start()
