@@ -338,6 +338,23 @@ beforeEach(() => {
   for (const registration of registry.values()) registration.listener.mockClear();
 });
 
+it('keeps update admission open and never starts installation while pending captures need a decision', async () => {
+  const install = vi.fn(async () => undefined);
+  const show = vi.fn(async () => undefined);
+  const local = tripwireHost({
+    updateInstallPending: false,
+    quickCaptureAccess: { store: { size: 2 }, show },
+    updateController: { install },
+  });
+  const { registry: handlers } = await registerHandlerModules(local.host);
+  await expect(handlers.get('update:install')!.invoke(trusted)).rejects.toThrow(
+    /Add or discard pending captures/,
+  );
+  expect(show).toHaveBeenCalledWith(true);
+  expect(install).not.toHaveBeenCalled();
+  expect(local.reached).not.toContain('set updateInstallPending');
+});
+
 it('hands off only the selected non-first part of a multi-part export through actual MCP', async () => {
   const projectPath = path.join(workspace, 'handoff-project');
   const document = emptyProject('Handoff project', '');
