@@ -49,7 +49,7 @@ describe('SettingsView category navigation', () => {
     window.imnota = { copyText } as unknown as typeof window.imnota;
     render(<SettingsView activeCategory="Features" />);
     const section = screen.getByRole('region', { name: 'MCP access Beta' });
-    expect(section).not.toHaveTextContent(/Claude|Cursor/);
+    expect(section).not.toHaveTextContent(/\b(?:Claude|Cursor)\b/);
     const prompt = screen.getByTestId('agent-access-prompt').textContent ?? '';
     expect(prompt).toContain('http://127.0.0.1:17384/mcp');
     expect(prompt).toContain('--mcp');
@@ -61,6 +61,7 @@ describe('SettingsView category navigation', () => {
       'list_collections',
       'list_collection_items',
       'get_latest_bundle',
+      'list_new_since',
       'get_bundle',
       'inspect_bundle',
       'get_item',
@@ -68,7 +69,7 @@ describe('SettingsView category navigation', () => {
     ])
       expect(prompt).toContain(tool);
     expect(prompt).toContain('Allow local agent access');
-    expect(prompt).not.toMatch(/Claude|Cursor/);
+    expect(prompt).not.toMatch(/\b(?:Claude|Cursor)\b/);
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy prompt' }));
     await screen.findByRole('button', { name: 'Copied' });

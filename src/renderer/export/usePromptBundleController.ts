@@ -48,6 +48,10 @@ export interface PromptBundleController {
   copyImage(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult>;
   openFiles(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult>;
   copyPaths(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult>;
+  copyForTerminal(
+    selection: PromptBundleSelection,
+    wsl?: boolean,
+  ): Promise<PromptBundleControllerActionResult>;
   openFolder(): Promise<PromptBundleControllerActionResult>;
   cancel(): Promise<PromptBundleControllerActionResult>;
   retryCleanup(): Promise<PromptBundleControllerActionResult>;
@@ -180,6 +184,8 @@ export function usePromptBundleController(options: UsePromptBundleControllerOpti
         runForBundle(selection, (current) => engine.openFiles(current)),
       copyPaths: (selection: PromptBundleSelection) =>
         runForBundle(selection, (current) => engine.copyPaths(current)),
+      copyForTerminal: (selection: PromptBundleSelection, wsl?: boolean) =>
+        runForBundle(selection, (current) => engine.copyForTerminal(current, wsl)),
       openFolder: () => run(() => engine.openFolder()),
       cancel: () => engine.cancel(),
       retryCleanup: () => engine.retryCleanup(),

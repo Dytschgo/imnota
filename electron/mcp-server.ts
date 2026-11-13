@@ -107,6 +107,9 @@ interface McpTool {
   handle(args: Record<string, unknown>): Promise<unknown>;
 }
 
+const MAX_LISTED_NEW_BUNDLES = 50;
+const DEFAULT_LISTED_NEW_BUNDLES = 10;
+
 const projectPathSchema = z.string().min(1).max(2000);
 const collectionIdSchema = filenameSchema;
 const itemIdSchema = z.string().min(1).max(200);
@@ -153,6 +156,16 @@ const getLatestBundleInput = z
     projectPath: projectPathSchema.optional(),
     collectionId: collectionIdSchema.optional(),
     ...bundleReadOptions,
+  })
+  .strict();
+/** Local wall-clock time in the same shape as `preparedAt`, so the comparison is a fixed-width string order. */
+const preparedAtSchema = z.iso.datetime({ local: true }).regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
+const listNewSinceInput = z
+  .object({
+    since: preparedAtSchema.optional(),
+    projectPath: projectPathSchema.optional(),
+    limit: z.number().int().min(1).max(MAX_LISTED_NEW_BUNDLES).optional(),
+    cursor: z.string().regex(BUNDLE_ID).optional(),
   })
   .strict();
 /** Opaque identifier: a fixed-shape digest that cannot carry separators, dots or drive letters. */
@@ -835,6 +848,57 @@ export function createMcpTools(
         const bundle = await firstReadable(sets, input);
         if (!bundle) throw new Error(BUNDLE_NOT_PREPARED);
         return bundle;
+      },
+    },
+    {
+      name: 'list_new_since',
+      description:
+        'List already-prepared bundles newer than `since` (local time YYYY-MM-DDTHH:MM:SS), newest first. Without `since` it lists the most recent ones. Active projects and collections only; projectPath narrows to one project. Returns ids, paths and times only: read one with get_bundle. When more is true, repeat the same query with nextCursor as cursor before advancing since. A removed or out-of-scope cursor errors: restart and deduplicate ids. Does not generate an export.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          since: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}$' },
+          projectPath: { type: 'string', minLength: 1, maxLength: 2000 },
+          limit: { type: 'integer', minimum: 1, maximum: MAX_LISTED_NEW_BUNDLES },
+          cursor: { type: 'string', pattern: '^b_[a-f0-9]{32}$' },
+        },
+        additionalProperties: false,
+      },
+      async handle(args) {
+        const input = listNewSinceInput.parse(args);
+        let sets: PreparedSet[];
+        if (input.projectPath) {
+          const projectPath = await authorize(input.projectPath);
+          const project = await readProjectDocument(projectPath);
+          sets =
+            project.status === 'active'
+              ? await projectSets(projectPath, project, (collection) => !collection.archived)
+              : [];
+        } else sets = await workspaceSets(true);
+        const { since } = input;
+        const newer = sets.filter((set) => !since || set.preparedAt > since).sort(compareLatest);
+        const limit = input.limit ?? DEFAULT_LISTED_NEW_BUNDLES;
+        const cursorIndex = input.cursor ? newer.findIndex((set) => set.id === input.cursor) : -1;
+        if (input.cursor && cursorIndex < 0)
+          throw new Error(
+            'The inbox cursor is unavailable in this query; restart and deduplicate bundle ids.',
+          );
+        const remaining = newer.slice(cursorIndex + 1);
+        const page = remaining.slice(0, limit);
+        const more = remaining.length > limit;
+        return {
+          ...(since ? { since } : {}),
+          bundles: page.map((set) => ({
+            id: set.id,
+            setName: set.setName,
+            projectPath: set.projectPath,
+            collectionId: set.collectionId,
+            preparedAt: set.preparedAt,
+            folderPath: set.folder,
+          })),
+          more,
+          ...(more ? { nextCursor: page.at(-1)!.id } : {}),
+        };
       },
     },
     {
