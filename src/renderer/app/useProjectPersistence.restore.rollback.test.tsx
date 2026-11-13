@@ -49,14 +49,29 @@ it('suppresses a native drawing Restore event before parent sync completes', asy
   );
   const restoring = f.restore();
   void restoring.catch(() => undefined);
+  let foreign: Buffer | undefined;
   try {
     await entered;
     const relative = path.relative(f.projectPath, held.target).replaceAll('\\', '/');
     await waitFor(() => expect(f.completedFlushPaths.some((paths) => paths.includes(relative))).toBe(true));
     expect(f.events).toEqual([]);
+    foreign = Buffer.from('External drawing PNG bytes');
+    await fs.writeFile(held.target, foreign);
+    await waitFor(() =>
+      expect(f.events).toContainEqual(
+        expect.objectContaining({
+          kind: 'external-change',
+          changedPaths: expect.arrayContaining([relative]),
+        }),
+      ),
+    );
+    expect(await fs.readFile(held.target)).toEqual(foreign);
   } finally {
     release();
-    await restoring;
+    if (foreign) {
+      await expect(restoring).rejects.toThrow('did not restore byte-exactly');
+      expect(await fs.readFile(held.target)).toEqual(foreign);
+    } else await restoring;
   }
 });
 
