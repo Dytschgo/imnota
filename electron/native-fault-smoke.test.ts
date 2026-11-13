@@ -3,11 +3,83 @@ import fs from 'node:fs/promises';
 import { watch } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { runInNewContext } from 'node:vm';
+import type { BrowserWindow } from 'electron';
 import { expect, it, vi } from 'vitest';
 import type { FaultObservation } from '../src/shared/native-faults.js';
-import { editExternalFaultMember } from './native-fault-smoke.js';
+import { createNativeFaultProject, editExternalFaultMember } from './native-fault-smoke.js';
+import { NativeUiDriver } from './smoke-native-driver.js';
 
 vi.mock('electron', () => ({ nativeImage: {} }));
+
+it.each(['slow', 'stuck'] as const)(
+  'bounds each native fixture operation independently (%s)',
+  async (mode) => {
+    vi.useFakeTimers();
+    const calls: string[] = [];
+    const snapshot = {
+      projectPath: '/fixture',
+      project: { collections: [{ id: 'collection' }], contentItems: [{ id: 'text', kind: 'text' }] },
+    };
+    const api = Object.fromEntries(
+      [
+        'createProject',
+        'importImageFiles',
+        'createContentItem',
+        'loadContentItem',
+        'saveContentItem',
+        'loadProject',
+      ].map((method) => [
+        method,
+        async () => {
+          calls.push(method);
+          if (mode === 'stuck' && method === 'importImageFiles') await new Promise(() => {});
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+          return method === 'loadContentItem' ? { contentRevision: 'revision' } : snapshot;
+        },
+      ]),
+    );
+    const driver = new NativeUiDriver({
+      webContents: {
+        executeJavaScript: (source: string) => runInNewContext(source, { window: { imnota: api } }),
+      },
+    } as unknown as BrowserWindow);
+    const pending = createNativeFaultProject(driver, 'Fixture', '/fixture.png');
+    const result = pending.then(
+      (value) => ({ value }),
+      (error: unknown) => ({ error }),
+    );
+    try {
+      await vi.advanceTimersByTimeAsync(mode === 'slow' ? 21000 : 17999);
+      if (mode === 'slow') {
+        expect(await result).toEqual({ value: snapshot });
+        expect(calls).toEqual([
+          'createProject',
+          'importImageFiles',
+          'createContentItem',
+          'createContentItem',
+          'loadContentItem',
+          'saveContentItem',
+          'loadProject',
+        ]);
+      } else {
+        let settled = false;
+        void result.then(() => {
+          settled = true;
+        });
+        await Promise.resolve();
+        expect(settled).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(await result).toMatchObject({
+          error: { message: expect.stringContaining('importImageFiles') },
+        });
+        expect(calls).toEqual(['createProject', 'importImageFiles']);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
 
 it.each([null, 'old-revision'])(
   'does not edit a reopened fixture with watch revision %s before the expected revision',
