@@ -81,14 +81,22 @@ export async function exerciseAgentHandoff(
       .sort((a, b) => a.position - b.position)[0];
     if (!selected) throw new Error('Agent handoff smoke needs an included screenshot.');
     await driver.click({ selector: `[data-testid="screenshot-${selected.id}"]` });
-    await driver.fill(
-      { selector: 'textarea[aria-label="Description"]' },
-      'HANDOFF_CURRENT_EDIT_NOT_IN_SAVED_EXPORT',
-    );
+    // The inspector exists during asynchronous selection loading. Establish the intended
+    // loaded screenshot before editing, then verify the saved edit before testing freshness.
+    await driver.waitForScreenshotCanvas(selected);
+    const marker = 'HANDOFF_CURRENT_EDIT_NOT_IN_SAVED_EXPORT';
+    await driver.fill({ selector: 'textarea[aria-label="Description"]' }, marker);
     await driver.click({ selector: '[data-testid="share-prompt-bundles"]' });
     await driver.waitFor({
       selector: '[data-testid="prompt-sharing-dialog"][aria-busy="false"] [data-testid="copy-bundle-1"]',
     });
+    const editedProject = await host.readProject(projectPath);
+    const edited = editedProject.screenshots.find((shot) => shot.id === selected.id);
+    if (
+      edited?.description !== marker ||
+      (await fs.readFile(path.join(projectPath, selected.descriptionFile), 'utf8')) !== marker
+    )
+      throw new Error('The intended handoff fixture edit was not saved before freshness inspection.');
     await openHandoff();
     await driver.waitFor({
       selector: '[role="status"]',

@@ -244,6 +244,7 @@ export interface WorkflowBridge {
     WorkflowResult<
       | { snapshot: ProjectSnapshot; screenshotId: string; overlayAction: 'save' | 'annotate' }
       | { buffered: true; overlayAction: 'save' | 'annotate' }
+      | { quickAccess: true; captureId: string }
     >
   >;
   commitBufferedCapture(input: {
@@ -255,8 +256,13 @@ export interface WorkflowBridge {
   repeatLastRegionCapture(input: {
     projectPath: string;
     collectionId: string;
-  }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string }>>;
+  }): Promise<
+    WorkflowResult<
+      { snapshot: ProjectSnapshot; screenshotId: string } | { quickAccess: true; captureId: string }
+    >
+  >;
   discardBufferedCapture(): Promise<WorkflowResult<void>>;
+  showQuickCaptures(): Promise<WorkflowResult<void>>;
   captureRendererReady(): Promise<WorkflowResult<void>>;
   /** macOS: reset Imnota's Screen Recording entry, ask again and open its Settings page. */
   repairCapturePermission(): Promise<WorkflowResult<{ reset: boolean }>>;

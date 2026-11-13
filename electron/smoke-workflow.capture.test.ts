@@ -165,6 +165,7 @@ const canvasFreeByModule = new Map<string, Set<string>>([
       'capture-cross-display-synthetic.png', // Cross-display region-selection overlay.
     ]),
   ],
+  ['quick-capture-smoke.ts', new Set(['quick-capture-three-cards.png'])],
   [
     'mixed-content-smoke.ts',
     new Set([

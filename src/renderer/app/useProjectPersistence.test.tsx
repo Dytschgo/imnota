@@ -112,6 +112,40 @@ beforeEach(() => {
 });
 
 describe('useProjectPersistence', () => {
+  it('keeps unsaved edits and the accepted baseline when Quick Add asks the open project to reload', async () => {
+    const source = snapshot();
+    const mock = bridge();
+    window.imnota = mock.value as never;
+    const onSnapshot = vi.fn();
+    const { result } = renderHook(() =>
+      useProjectPersistence({
+        snapshot: source,
+        activeScreenshot: source.project.screenshots[0]!,
+        onProject: vi.fn(),
+        onSnapshot,
+        onSelectScreenshot: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(result.current.projectRevision).toBe('project-1'));
+    act(() => result.current.queueProjectMetadata({ ...source.project, name: 'Unsaved local name' }));
+    act(() =>
+      mock.emit({
+        watchId: 'watch',
+        projectPath: source.projectPath,
+        kind: 'external-change',
+        projectRevision: 'capture-added',
+        changedPaths: ['project.json'],
+        message: 'A pending capture was added to this project.',
+      }),
+    );
+    expect(result.current.externalChange?.message).toContain('A pending capture was added');
+    expect(result.current.externalChange?.message).toContain('Your unsaved work is preserved');
+    expect(result.current.hasUnsavedChanges).toBe(true);
+    expect(result.current.projectRevision).toBe('project-1');
+    expect(onSnapshot).not.toHaveBeenCalled();
+    expect(mock.value.reloadWatchedProject).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['screenshot description', ['collections/001/descriptions/one.md'], true],
     ['drawing source', ['collections/001/drawings/one.json'], true],

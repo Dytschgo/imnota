@@ -139,7 +139,7 @@ async function screenshotFiles(projectPath: string): Promise<string[]> {
   return files.sort();
 }
 
-async function openScreenshotProject(driver: NativeUiDriver): Promise<string> {
+export async function openScreenshotProject(driver: NativeUiDriver): Promise<string> {
   const target = await driver.evaluate<{
     projectPath: string;
     name: string;
@@ -254,7 +254,7 @@ async function chooseAddMenuItem(driver: NativeUiDriver, id: string): Promise<vo
   await driver.click({ selector: `[data-testid="add-item-${id}"]:not([aria-disabled="true"])` });
 }
 
-async function startCapture(
+export async function startCapture(
   driver: NativeUiDriver,
   trigger: 'menu' | 'global-shortcut' = 'menu',
 ): Promise<NativeUiDriver> {
@@ -850,14 +850,61 @@ export async function exerciseRegionCapture(
   // same source pixels and crop through the normal renderer/native IPC path.
   await driver.press('6', [process.platform === 'darwin' ? 'meta' : 'control', 'shift']);
   const afterRepeat = await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 4);
-  const repeated = afterRepeat.screenshots.at(-1);
+  // Physical metadata-array order is not screenshot display order. Identify the
+  // one newly inserted item, just as the display-capture check above does.
+  const repeatedItems = afterRepeat.screenshots.filter(
+    (shot) => !afterDisplay.screenshots.some((previous) => previous.id === shot.id),
+  );
+  const repeated = repeatedItems.length === 1 ? repeatedItems[0] : undefined;
+  if (artifactDirectory)
+    await fs.writeFile(
+      path.join(artifactDirectory, 'capture-repeat-observation.json'),
+      JSON.stringify(
+        {
+          expected: { id: captured.id, width: captured.originalWidth, height: captured.originalHeight },
+          addedIds: repeatedItems.map((shot) => shot.id),
+          beforeRepeat: afterDisplay.screenshots.map((shot) => ({
+            id: shot.id,
+            width: shot.originalWidth,
+            height: shot.originalHeight,
+          })),
+          afterRepeat: afterRepeat.screenshots.map((shot) => ({
+            id: shot.id,
+            width: shot.originalWidth,
+            height: shot.originalHeight,
+          })),
+        },
+        null,
+        2,
+      ),
+    );
   if (
     !repeated ||
     repeated.id === captured.id ||
     repeated.originalWidth !== captured.originalWidth ||
     repeated.originalHeight !== captured.originalHeight
   )
-    throw new Error('Repeat capture did not preserve the original crop dimensions.');
+    throw new Error(
+      'Repeat capture did not preserve the original crop dimensions. ' +
+        JSON.stringify({
+          expected: { id: captured.id, width: captured.originalWidth, height: captured.originalHeight },
+          chosen: repeated && {
+            id: repeated.id,
+            width: repeated.originalWidth,
+            height: repeated.originalHeight,
+          },
+          beforeRepeat: afterDisplay.screenshots.map((shot) => ({
+            id: shot.id,
+            width: shot.originalWidth,
+            height: shot.originalHeight,
+          })),
+          afterRepeat: afterRepeat.screenshots.map((shot) => ({
+            id: shot.id,
+            width: shot.originalWidth,
+            height: shot.originalHeight,
+          })),
+        }),
+    );
   const [originalBytes, repeatedBytes] = await Promise.all([
     fs.readFile(screenshotPath(projectPath, captured)),
     fs.readFile(screenshotPath(projectPath, repeated)),

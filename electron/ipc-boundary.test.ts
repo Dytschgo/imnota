@@ -338,6 +338,23 @@ beforeEach(() => {
   for (const registration of registry.values()) registration.listener.mockClear();
 });
 
+it('keeps update admission open and never starts installation while pending captures need a decision', async () => {
+  const install = vi.fn(async () => undefined);
+  const show = vi.fn(async () => undefined);
+  const local = tripwireHost({
+    updateInstallPending: false,
+    quickCaptureAccess: { store: { size: 2 }, show },
+    updateController: { install },
+  });
+  const { registry: handlers } = await registerHandlerModules(local.host);
+  await expect(handlers.get('update:install')!.invoke(trusted)).rejects.toThrow(
+    /Add or discard pending captures/,
+  );
+  expect(show).toHaveBeenCalledWith(true);
+  expect(install).not.toHaveBeenCalled();
+  expect(local.reached).not.toContain('set updateInstallPending');
+});
+
 it('hands off only the selected non-first part of a multi-part export through actual MCP', async () => {
   const projectPath = path.join(workspace, 'handoff-project');
   const document = emptyProject('Handoff project', '');
@@ -455,7 +472,14 @@ describe('renderer bridge, contracts and handlers stay consistent', () => {
       if (!file.endsWith('.ts') || file.endsWith('.test.ts')) continue;
       sent.push(...literals(await readSource(file), /webContents\.send\(\s*'([^']+)'/g));
     }
-    expect(sorted(sent.filter((channel) => !channel.startsWith('capture-overlay:')))).toEqual(listened);
+    // Separate capture renderers have dedicated preload/handler contract tests.
+    expect(
+      sorted(
+        sent.filter(
+          (channel) => !channel.startsWith('capture-overlay:') && !channel.startsWith('quick-capture:'),
+        ),
+      ),
+    ).toEqual(listened);
   });
 
   it('keeps the capture overlay preload and its main-process listeners in step', async () => {

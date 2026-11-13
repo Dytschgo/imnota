@@ -1205,6 +1205,11 @@ export default function App() {
             collectionId: target.collectionId,
           }),
         );
+        if ('quickAccess' in result) {
+          await persistence.cancelNativeMutation(nativeMutationToken);
+          nativeMutationToken = null;
+          return;
+        }
         const accepted = await finishCapturedScreenshot(
           result.snapshot,
           result.screenshotId,
@@ -1262,6 +1267,11 @@ export default function App() {
             ...(delaySeconds ? { delaySeconds } : {}),
           }),
         );
+        if ('quickAccess' in result) {
+          await persistence.cancelNativeMutation(nativeMutationToken);
+          nativeMutationToken = null;
+          return;
+        }
         if ('buffered' in result) {
           pendingOverlayAction.current = result.overlayAction;
           await persistence.cancelNativeMutation(nativeMutationToken);
@@ -2327,6 +2337,7 @@ export default function App() {
             onShortcutChange={preferences.saveShortcuts}
             globalCaptureShortcutRegistered={preferences.capabilities.globalCaptureShortcutRegistered}
             onPromptExportChange={preferences.savePromptExport}
+            onCaptureChange={preferences.saveCapture}
             projects={store.projects}
             onBackupChange={preferences.saveBackups}
             onBeforeBackupAction={prepareBackupAction}

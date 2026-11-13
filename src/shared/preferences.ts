@@ -61,6 +61,8 @@ export interface ShortcutPreferences {
 /** Region capture is available by default on new Windows/macOS profiles; saved values remain per-profile. */
 export interface CapturePreferences {
   experimentalRegionCapture: boolean;
+  /** Missing in existing profiles means off. Pending captures are kept until Add or Discard. */
+  quickAccessCorner?: 'off' | 'left' | 'right';
 }
 
 export function defaultExperimentalRegionCapture(platform = process.platform): boolean {

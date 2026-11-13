@@ -32,7 +32,7 @@ export function isStrictChild(parent, target) {
 }
 
 export function normalizeNativeVerificationMode(mode = 'smoke') {
-  if (!['smoke', 'stress', 'clipboard', 'faults'].includes(mode))
+  if (!['smoke', 'stress', 'clipboard', 'faults', 'quick-capture'].includes(mode))
     throw new Error(`Unknown native verification mode: ${mode}.`);
   return mode;
 }

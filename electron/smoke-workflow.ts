@@ -21,6 +21,9 @@ import { findWhatsNewRelease } from '../src/shared/whats-new.js';
 import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
 import { planHostedShares, hostedShareSummary } from './hosted-share-plan.js';
 import { exerciseRegionCapture } from './capture-smoke.js';
+import { exerciseQuickCaptures } from './quick-capture-smoke.js';
+import { smokeStringLiteral } from './smoke-string-literal.js';
+import type { QuickCaptureWindow } from './quick-capture-window.js';
 import type { CaptureDisplay } from '../src/shared/capture.js';
 import { exerciseSourceContext } from './source-context-smoke.js';
 import { exerciseNextFeatures, captureNextFeatureLightViews } from './next-features-smoke.js';
@@ -43,9 +46,10 @@ import {
   type SmokePoint,
 } from './smoke-native-driver.js';
 
-export type SmokeWorkflowMode = 'smoke' | 'stress' | 'clipboard' | 'faults';
+export type SmokeWorkflowMode = 'smoke' | 'stress' | 'clipboard' | 'faults' | 'quick-capture';
 
 export interface SmokeWorkflowHost {
+  quickCaptures(): QuickCaptureWindow;
   diagnosticsHealth(): ReturnType<PersistenceDiagnostics['health']>;
   /** Update the in-memory production workspace without opening a native chooser. */
   setWorkspace(workspacePath: string): void | Promise<void>;
@@ -2969,6 +2973,33 @@ export async function runSmokeWorkflow(
     throw new Error('Updater/channel bridge did not remain offline and idle during smoke.');
   assertions.push('updater bridge and offline smoke state');
 
+  if (mode === 'quick-capture') {
+    // Focus the existing isolated runner on the new native window and its real
+    // capture/clipboard/filesystem paths. The full walkthrough remains a gate.
+    await driver.evaluate(
+      `(async()=>{const result=await window.imnota.setPreferenceSettings({onboarding:{completed:true},updates:{whatsNewAcknowledgedVersion:${smokeStringLiteral(options.version)}}});if(!result.ok)throw new Error(result.error.message);})()`,
+    );
+    driver.setWindow(await host.reopenWindow());
+    await driver.waitFor({ selector: '.library' });
+    const projectPath = await createProjectThroughUi(driver, 'Quick Capture Verification', false);
+    await importImages(driver, projectPath, sources, 3);
+    artifacts.push(...(await exerciseQuickCaptures(host, artifactDirectory)));
+    assertions.push(
+      'persistent quick capture ownership, native copy/drag, compact annotation, exact Add and independent Discard',
+    );
+    const report: SmokeWorkflowReport = {
+      passed: true,
+      version: options.version,
+      mode,
+      artifacts,
+      timings,
+      assertions,
+      diagnosticsHealth: host.diagnosticsHealth(),
+    };
+    await writeReportArtifact(artifactDirectory, report);
+    return report;
+  }
+
   if (mode === 'clipboard') {
     // Focused check of the real export and paste path from the workspace toolbar.
     // Preferences and project files belong to this run's disposable profile.
@@ -3620,6 +3651,10 @@ export async function runSmokeWorkflow(
     );
   }
 
+  artifacts.push(...(await exerciseQuickCaptures(host, artifactDirectory)));
+  assertions.push(
+    'persistent quick capture ownership, native copy, compact annotation, exact Add and independent Discard',
+  );
   await checkpoint('all native workflow checks complete');
   const report: SmokeWorkflowReport = {
     passed: true,

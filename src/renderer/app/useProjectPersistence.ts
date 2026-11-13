@@ -846,9 +846,10 @@ export function useProjectPersistence({
       publishExternalChange({
         kind: 'external-change',
         message:
-          metadataDirty.current || hasDirtyDrafts()
-            ? 'This project changed outside Imnota. Your unsaved work is preserved; save or resolve it before reloading.'
-            : 'This project changed outside Imnota. Reload to review the latest files.',
+          `${event.message ?? 'This project changed outside Imnota.'} ` +
+          (metadataDirty.current || hasDirtyDrafts()
+            ? 'Your unsaved work is preserved; save or resolve it before reloading.'
+            : 'Reload to review the latest files.'),
       });
     },
     [hasDirtyDrafts, publishExternalChange],
