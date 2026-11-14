@@ -114,6 +114,7 @@ const canvasFreeByModule = new Map<string, Set<string>>([
     'screenshot-comparison-smoke.ts',
     new Set([
       'comparison-current-expected.png', // Modal displays decoded export-rendered images, not an annotation canvas.
+      'comparison-ready.png', // Included pair of decoded comparison images.
       'comparison-before-after-narrow.png', // Same image viewer after native role selection and resize.
     ]),
   ],
@@ -138,6 +139,7 @@ const canvasFreeByModule = new Map<string, Set<string>>([
       '1280x800-onboarding-intro.png',
       '1280x800-onboarding-copy.png',
       '1280x800-whats-new.png',
+      '`${viewport.width}x${viewport.height}-whats-new-page.png`',
       '1440x900-settings.png',
       '`${viewport.width}x${viewport.height}-settings-features.png`',
       '`${viewport.width}x${viewport.height}-settings-workspace.png`',

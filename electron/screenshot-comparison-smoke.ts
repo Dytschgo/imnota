@@ -140,6 +140,14 @@ export async function exerciseScreenshotComparison(
   ] as const) {
     await chooseOption(label, steps);
   }
+  await driver.click({ selector: 'button', text: 'Save comparison', exact: true });
+  await driver.waitFor({ selector: '[role="status"]', text: 'Comparison saved.', exact: false });
+  const ready = await host.readProject(projectPath);
+  const readyPair = ready.collections.find((entry) => entry.id === collection.id)?.comparison;
+  if (readyPair?.leftId !== shots[1].id || readyPair.rightId !== shots[4].id)
+    throw new Error('The included comparison pair did not persist before its capture.');
+  if (artifactDirectory)
+    captures.push(await driver.capture(artifactDirectory, 'comparison-ready.png', 'none'));
   await driver.waitFor({ selector: '.comparison-link input' }, { enabled: true });
   await driver.evaluate(`document.querySelector('input[aria-label="Before zoom"]').focus()`);
   await driver.press('Right');

@@ -10,6 +10,24 @@ vi.mock('../components/UpdateControl', () => ({ UpdateControl: () => null }));
 afterEach(cleanup);
 
 describe('SettingsView category navigation', () => {
+  it('opens illustrated nightly notes in their own category without changing the selected update channel', () => {
+    const onAction = vi.fn();
+    render(
+      <SettingsView
+        updateStatus={{ state: 'idle', currentVersion: '0.5.0-nightly.20261114.1', channel: 'stable' }}
+        onWhatsNewAction={onAction}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'What’s new' }));
+    expect(screen.getByRole('button', { name: 'What’s new' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('heading', { name: 'Capture, compare and hand off' })).toBeInTheDocument();
+    expect(screen.getByText('Imnota 0.5.0-nightly.20261114.1 · Nightly preview')).toBeInTheDocument();
+    const notes = screen.getByRole('region', { name: 'Capture, compare and hand off' });
+    expect(notes.querySelectorAll('img')).toHaveLength(3);
+    fireEvent.click(within(notes).getAllByRole('button', { name: 'Try it now' })[1]!);
+    expect(onAction).toHaveBeenCalledExactlyOnceWith({ kind: 'settings', category: 'Features' });
+  });
+
   it('starts on Appearance and keeps its own category when uncontrolled', () => {
     render(<SettingsView />);
     expect(screen.getByRole('button', { name: 'Appearance' })).toHaveAttribute('aria-current', 'page');
@@ -91,11 +109,11 @@ describe('SettingsView category navigation', () => {
     );
   });
 
-  it('replays what’s new from Updates & about', () => {
+  it('replays what’s new from its dedicated category', () => {
     const onReplayWhatsNew = vi.fn();
     render(
       <SettingsView
-        activeCategory="Updates & about"
+        activeCategory="What’s new"
         updateStatus={{ state: 'idle', currentVersion: '0.2.8', channel: 'stable' }}
         onReplayWhatsNew={onReplayWhatsNew}
       />,

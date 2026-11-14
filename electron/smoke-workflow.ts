@@ -595,13 +595,50 @@ async function exerciseWhatsNew(
   await driver.click({ text: 'Later', exact: true });
   await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' }, { absent: true });
   await clickAny(driver, SMOKE_UI_CONTRACT.settings);
-  await driver.click({ text: 'Updates & about', exact: true });
+  await driver.click({ text: 'What’s new', exact: true });
+  await driver.waitFor({ selector: '[data-settings-category="What’s new"] .whats-new-settings' });
+  const actionableFeatures = release.features.filter((feature) => feature.action);
+  if (actionableFeatures[0]) {
+    await driver.press('Tab');
+    const focusedFeature = await driver.evaluate<string | undefined>(
+      `document.activeElement?.closest('[data-whats-new-feature]')?.getAttribute('data-whats-new-feature')`,
+    );
+    if (focusedFeature !== actionableFeatures[0].id)
+      throw new Error('Native Tab did not reach the first release action from its dedicated tab.');
+  }
+  for (const viewport of [
+    { width: 1280, height: 800 },
+    { width: 1080, height: 680 },
+  ]) {
+    await driver.resize(viewport);
+    await driver.evaluate(`(async () => {
+      const section = document.querySelector('.whats-new-settings');
+      const images = [...section.querySelectorAll('img')];
+      await Promise.all(images.map(image => image.decode()));
+      if (images.some(image => !image.complete || image.naturalWidth === 0))
+        throw new Error('A bundled release screenshot did not load.');
+      if (section.querySelectorAll('[data-whats-new-feature]').length !== ${release.features.length})
+        throw new Error('The installed release does not show all its feature cards.');
+      const grid = document.querySelector('.settings-view > .settings-grid');
+      if (grid.scrollWidth > grid.clientWidth + 1)
+        throw new Error('Release cards overflow the settings viewport.');
+      grid.scrollTop = 0;
+    })()`);
+    if (artifactDirectory)
+      artifacts.push(
+        await driver.capture(
+          artifactDirectory,
+          `${viewport.width}x${viewport.height}-whats-new-page.png`,
+          'none',
+        ),
+      );
+  }
+  await driver.resize({ width: 1280, height: 800 });
   await driver.click({ text: 'Replay what’s new', exact: true });
   await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' });
-  const actionableFeatures = release.features.filter((feature) => feature.action);
   for (const [index, feature] of actionableFeatures.entries()) {
     if (index > 0) {
-      await driver.click({ text: 'Updates & about', exact: true });
+      await driver.click({ text: 'What’s new', exact: true });
       await driver.click({ text: 'Replay what’s new', exact: true });
       await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' });
     }
@@ -1520,7 +1557,7 @@ async function captureWorkspaceMatrix(
         'none',
       ),
     );
-    await driver.click({ selector: '.settings-navigation button', text: 'Updates & about', exact: true });
+    await driver.click({ selector: '.settings-navigation button', text: 'What’s new', exact: true });
     await driver.waitFor({ selector: '.whats-new-settings' });
     await assertSettingsCardSpacing(driver);
     await driver.evaluate(`document.querySelector('.whats-new-settings').scrollIntoView({ block: 'start' })`);
