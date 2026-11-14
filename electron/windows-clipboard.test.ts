@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { nativeClipboardFailure } from './clipboard-errors.js';
+import { workflowOutcome } from './workflow-errors.js';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -85,6 +87,7 @@ function nativeMock(initial: Array<[number, Buffer]> = []): MockNative {
           [0xc008, 'CanIncludeInClipboardHistory'],
           [0xc009, 'CanUploadToCloudClipboard'],
           [0xc00a, 'ExcludeClipboardContentFromMonitorProcessing'],
+          [0xc00b, 'System.Drawing.Bitmap'],
         ]).get(format) ?? '';
       output.write(name, 'utf16le');
       return name.length;
@@ -495,6 +498,46 @@ describe('Windows clipboard payloads', () => {
     expect(native.emptyClipboard).not.toHaveBeenCalled();
   });
 
+  it('copies over serialized System.Drawing.Bitmap bytes and restores them after a late rich write failure', async () => {
+    const prior = Buffer.from([0, 1, 0, 255, 83, 68, 66, 0, 127]);
+    const copied = nativeMock([[0xc00b, prior]]);
+    copied.api.getObject = vi.fn(copied.api.getObject);
+    copied.api.copyImage = vi.fn(copied.api.copyImage);
+    await expect(writeWindowsClipboard(hwnd(), { filePaths: pair }, copied.api)).resolves.toBeUndefined();
+    expect([...copied.clipboard.keys()]).toEqual([15]);
+    expect(copied.api.getObject).not.toHaveBeenCalled();
+    expect(copied.api.copyImage).not.toHaveBeenCalled();
+
+    const failed = nativeMock([[0xc00b, prior]]);
+    failed.failSetFormat = 17;
+    await expect(
+      writeWindowsClipboard(
+        hwnd(),
+        {
+          filePaths: pair,
+          markdown: '# Synthetic',
+          html: '<p>Synthetic</p>',
+          png: Buffer.from('PNG'),
+          dibV5: windowsDibV5Buffer(Buffer.alloc(16), 2, 2),
+        },
+        failed.api,
+      ),
+    ).rejects.toThrow(/rejected clipboard format 17/i);
+    expect(failed.emptyClipboard).toHaveBeenCalledTimes(2);
+    expect([...failed.clipboard.keys()]).toEqual([0xc00b]);
+    expect(failed.memory.get(failed.clipboard.get(0xc00b)!)).toEqual(prior);
+  });
+
+  it('rejects oversized serialized System.Drawing.Bitmap before clearing the clipboard', async () => {
+    const native = nativeMock([[0xc00b, Buffer.from('retained')]]);
+    native.api.globalSize = () => WINDOWS_CLIPBOARD_SNAPSHOT_MAX_FORMAT_BYTES + 1;
+    await expect(writeWindowsClipboard(hwnd(), { filePaths: pair }, native.api)).rejects.toThrow(
+      /too large/i,
+    );
+    expect(native.emptyClipboard).not.toHaveBeenCalled();
+    expect(native.memory.get(native.clipboard.get(0xc00b)!)).toEqual(Buffer.from('retained'));
+  });
+
   it('leaves an unsupported registered content format untouched', async () => {
     const native = nativeMock([[0xc005, Buffer.from('unknown content')]]);
     await expect(writeWindowsClipboard(hwnd(), { filePaths: pair }, native.api)).rejects.toThrow(
@@ -543,4 +586,57 @@ it.runIf(process.platform === 'win32')('loads and invokes the bundled Koffi Win3
   api.globalUnlock(handle);
   expect(api.globalSize(handle)).toBeGreaterThanOrEqual(32);
   expect(api.globalFree(handle)).toBeFalsy();
+});
+
+describe('Windows clipboard workflow error boundary', () => {
+  async function outcome(native: MockNative, options = {}) {
+    return workflowOutcome(async () => {
+      try {
+        await writeWindowsClipboard(hwnd(), { filePaths: pair }, native.api, options);
+      } catch (error) {
+        throw nativeClipboardFailure(error);
+      }
+    });
+  }
+
+  it.each([
+    'busy timeout',
+    'sequence change',
+    'open failure',
+    'unsupported prior format',
+    'oversized prior format',
+    'registered prior format',
+    'write rejection',
+  ])('classifies %s without changing the native transaction', async (failure) => {
+    const priorFormat =
+      failure === 'unsupported prior format' ? 3 : failure === 'registered prior format' ? 0xc005 : 13;
+    const native = nativeMock([[priorFormat, Buffer.from('prior')]]);
+    let reason = 'rejected';
+    let retryable = false;
+    const options = {
+      timeoutMs: 0,
+      yieldControl: async () => {
+        native.clipboardSequence++;
+      },
+    };
+    if (failure === 'busy timeout' || failure === 'sequence change') {
+      native.openClipboard.mockReturnValue(false);
+      native.api.getLastError = () => 5;
+      if (failure === 'sequence change') options.timeoutMs = 100;
+      reason = 'busy';
+      retryable = true;
+    } else if (failure === 'open failure') {
+      native.openClipboard.mockReturnValue(false);
+      native.api.getLastError = () => 87;
+    } else if (failure.includes('prior format')) {
+      if (failure === 'oversized prior format')
+        native.api.globalSize = () => WINDOWS_CLIPBOARD_SNAPSHOT_MAX_FORMAT_BYTES + 1;
+      reason = 'prior-content';
+    } else native.failSetFormat = 15;
+    await expect(outcome(native, options)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'clipboard-limit', retryable, details: { reason } },
+    });
+    if (failure !== 'write rejection') expect(native.emptyClipboard).not.toHaveBeenCalled();
+  });
 });

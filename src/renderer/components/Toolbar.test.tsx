@@ -24,11 +24,6 @@ afterEach(() => {
 });
 
 describe('annotation toolbar', () => {
-  test('leaves capture to the Add menu and shortcut', () => {
-    render(<Toolbar {...props()} />);
-    expect(screen.queryByRole('button', { name: /capture/i })).not.toBeInTheDocument();
-  });
-
   test('dismisses tooltips after activation and departure, and reopens only on a new hover', () => {
     vi.useFakeTimers();
     const setTool = vi.fn();

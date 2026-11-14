@@ -100,6 +100,15 @@ export interface PromptExportBundleContent extends PromptExportBundleGrant {
   imageDataUrl?: string;
 }
 
+export interface PromptExportAgentHandoff {
+  bundleId: string;
+  setName: string;
+  collectionName: string;
+  bundleNumber: number;
+  instruction: string;
+  agentAccessEnabled: boolean;
+}
+
 /** Deliberately contains only rendered prompt artifacts, never project paths or sources. */
 export interface HostedSharePlan {
   planId: string;
@@ -156,7 +165,15 @@ export interface PromptExportSourceAsset {
 export const WINDOWS_COPY_VARIANT_IDS = ['files', 'files-rich', 'rich'] as const;
 export type WindowsCopyVariantId = NativeCopyFunction;
 
-export type PromptExportCopyTarget = WindowsCopyVariantId | 'markdown' | 'image' | 'paths';
+export type PromptExportCopyTarget =
+  | WindowsCopyVariantId
+  | 'markdown'
+  | 'image'
+  | 'paths'
+  /** Plain-text hand-off for an agent CLI: summary plus quoted Markdown and PNG paths. */
+  | 'terminal'
+  /** Windows only: the same hand-off with paths translated for a WSL shell (/mnt/c/...). */
+  | 'terminal-wsl';
 
 /**
  * What the operating-system clipboard reports after a combined write. Read
@@ -227,6 +244,7 @@ export interface WorkflowBridge {
     WorkflowResult<
       | { snapshot: ProjectSnapshot; screenshotId: string; overlayAction: 'save' | 'annotate' }
       | { buffered: true; overlayAction: 'save' | 'annotate' }
+      | { quickAccess: true; captureId: string }
     >
   >;
   commitBufferedCapture(input: {
@@ -238,8 +256,13 @@ export interface WorkflowBridge {
   repeatLastRegionCapture(input: {
     projectPath: string;
     collectionId: string;
-  }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string }>>;
+  }): Promise<
+    WorkflowResult<
+      { snapshot: ProjectSnapshot; screenshotId: string } | { quickAccess: true; captureId: string }
+    >
+  >;
   discardBufferedCapture(): Promise<WorkflowResult<void>>;
+  showQuickCaptures(): Promise<WorkflowResult<void>>;
   captureRendererReady(): Promise<WorkflowResult<void>>;
   /** macOS: reset Imnota's Screen Recording entry, ask again and open its Settings page. */
   repairCapturePermission(): Promise<WorkflowResult<{ reset: boolean }>>;
@@ -270,11 +293,16 @@ export interface WorkflowBridge {
     sessionId: string;
     bundleNumber: number;
   }): Promise<WorkflowResult<PromptExportBundleContent>>;
+  getPromptExportAgentHandoff(input: {
+    sessionId: string;
+    bundleNumber: number;
+  }): Promise<WorkflowResult<PromptExportAgentHandoff>>;
   copyPromptExportBundle(input: {
     sessionId: string;
     bundleNumber: number;
     target: PromptExportCopyTarget;
   }): Promise<WorkflowResult<PromptExportCopyResult>>;
+  copyPromptExportMarkdown(text: string): Promise<WorkflowResult<void>>;
   openPromptExportBundle(input: {
     sessionId: string;
     bundleNumber: number;

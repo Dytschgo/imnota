@@ -135,7 +135,7 @@ describe('screenshot trash and Undo transactions', () => {
   });
 
   it.each(['image', 'annotations', 'description'] as const)(
-    'restores the byte-exact baseline when trashing %s fails',
+    'restores the byte-exact baseline when trash and local removal of %s both fail',
     async (failed) => {
       const { dir, project, targets } = await fixture();
       let injected = false;
@@ -146,7 +146,16 @@ describe('screenshot trash and Undo transactions', () => {
         }
         await fs.unlink(target);
       };
-      await expect(deleteScreenshotToTrash(dir, project, 'shot', trashItem)).rejects.toMatchObject({
+      await expect(
+        deleteScreenshotToTrash(dir, project, 'shot', trashItem, {
+          write: atomicWrite,
+          removeDirectory: defaultRemove,
+          unlink: async (target) => {
+            if (target === targets[failed]) throw new Error('injected local removal failure');
+            await fs.unlink(target);
+          },
+        }),
+      ).rejects.toMatchObject({
         code: 'delete-failed',
       });
       await expectPresent(targets);
@@ -175,6 +184,9 @@ describe('screenshot trash and Undo transactions', () => {
     const { dir, project, targets } = await fixture();
     const operations: ScreenshotTrashOperations = {
       write: atomicWrite,
+      unlink: async () => {
+        throw new Error('injected local removal failure');
+      },
       removeDirectory: async () => {
         throw new Error('injected cleanup failure');
       },
@@ -234,6 +246,9 @@ describe('screenshot trash and Undo transactions', () => {
       await fs.unlink(target);
     };
     const operations: ScreenshotTrashOperations = {
+      unlink: async () => {
+        throw new Error('injected local removal failure');
+      },
       write: async (target, content) => {
         if (trashFailed && !rollbackFailed && target === targets.image) {
           rollbackFailed = true;
@@ -308,6 +323,7 @@ describe('screenshot trash and Undo transactions', () => {
       descriptionFile: `collections/${screenshot.collectionId}/descriptions/002-second.png.md`,
     };
     project.screenshots.push(second);
+    project.collections[0].comparison = { kind: 'before-after', leftId: screenshot.id, rightId: second.id };
     await atomicWrite(targets.metadata, JSON.stringify(project));
     await atomicWrite(screenshotPath(dir, second), Buffer.from([4, 5, 6]));
     await atomicWrite(path.join(dir, second.annotationFile), '[{"id":"second"}]');
@@ -317,6 +333,7 @@ describe('screenshot trash and Undo transactions', () => {
     deletedA.project.name = 'Renamed between deletes';
     await atomicWrite(targets.metadata, JSON.stringify(deletedA.project));
     const deletedB = await deleteScreenshotToTrash(dir, deletedA.project, second.id, trashItem);
+    expect(deletedB.project.collections[0].comparison).toEqual(project.collections[0].comparison);
     deletedB.project.description = 'Edited after both deletes';
     await atomicWrite(targets.metadata, JSON.stringify(deletedB.project));
 
@@ -334,6 +351,7 @@ describe('screenshot trash and Undo transactions', () => {
     restoredA.project.favourite = true;
     await atomicWrite(targets.metadata, JSON.stringify(restoredA.project));
     const restoredB = await undoScreenshotDelete(dir, restoredA.project, deletedB.undoToken);
+    expect(restoredB.project.collections[0].comparison).toEqual(project.collections[0].comparison);
     expect(restoredB.project.favourite).toBe(true);
     expect(restoredB.project.screenshots.map((item) => item.id).sort()).toEqual([screenshot.id, second.id]);
     expect(await listScreenshotTrashTransactions(dir)).toEqual([]);
