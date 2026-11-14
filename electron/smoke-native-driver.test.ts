@@ -38,6 +38,7 @@ describe('native smoke driver', () => {
         document: {
           body: { innerText: 'Synthetic library' },
           activeElement: null,
+          hasFocus: () => false,
           querySelectorAll: () =>
             mode === 'missing'
               ? []
@@ -71,6 +72,7 @@ describe('native smoke driver', () => {
       expect(sample).toMatchObject({
         sampledAt: expect.any(String),
         eventLoopLagMs: 7,
+        documentHasFocus: false,
         wait: { locator: { selector: '.library' }, sampledAt: expect.any(String) },
       });
       expect(sample.wait.target).toEqual(
@@ -384,6 +386,20 @@ describe('native smoke driver', () => {
     );
     expect(window.webContents.insertText).toHaveBeenCalledWith('Typed text');
   });
+
+  it.each(['Enter', 'ENTER', 'Return'])(
+    'sends the complete %s sequence for native button activation',
+    async (keyCode) => {
+      const sendInputEvent = vi.fn();
+      const window = { webContents: { sendInputEvent } } as unknown as BrowserWindow;
+      await new NativeUiDriver(window, 100).press(keyCode);
+      expect(sendInputEvent.mock.calls.map(([event]) => event)).toEqual([
+        { type: 'keyDown', keyCode, modifiers: [] },
+        { type: 'char', keyCode: '\r', modifiers: [] },
+        { type: 'keyUp', keyCode, modifiers: [] },
+      ]);
+    },
+  );
 
   it.each([true, false])(
     'requires the trusted drag endpoint before release and fails closed when absent (delivered: %s)',

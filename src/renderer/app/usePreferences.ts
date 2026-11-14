@@ -43,6 +43,7 @@ export interface PreferenceController {
   saveOnboarding(value: OnboardingPreferences): Promise<void>;
   saveNativeCopy(value: PreferenceSettings['nativeCopy']): Promise<void>;
   savePromptExport(value: PreferenceSettings['promptExport']): Promise<void>;
+  saveCapture(value: PreferenceSettings['capture']): Promise<void>;
   saveUpdates(value: PreferenceSettings['updates']): Promise<void>;
   saveAgentAccess(value: AgentAccessPreferences): Promise<void>;
   clearError(): void;
@@ -145,6 +146,9 @@ export function usePreferences(): PreferenceController {
     },
     savePromptExport: async (promptExport) => {
       await save({ promptExport });
+    },
+    saveCapture: async (capture) => {
+      await save({ capture });
     },
     saveUpdates: async (updates) => {
       await save({ updates });

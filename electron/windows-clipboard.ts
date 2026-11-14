@@ -31,6 +31,8 @@ const SAFE_REGISTERED_GLOBAL_FORMATS = new Set([
   'text/html',
   'text/plain',
   'image/png',
+  // WinForms serializes this registered format in HGLOBAL, unlike CF_BITMAP's HBITMAP.
+  'System.Drawing.Bitmap',
   'Preferred DropEffect',
   'FileName',
   'FileNameW',
