@@ -92,6 +92,8 @@ Expected upload codes are `invalid_token` or `pairing_expired` (401), `pairing_u
 - `GET /api/shares/receipt/:requestId` with the original upload bearer recovers a committed receipt for 24 hours without resending artifact data.
 - `POST /api/shares/:id/revoke` with that share's management bearer immediately disables public access and is idempotent.
 
+Recipient Markdown links bare domains and email addresses while leaving bare IPv4 addresses as text. Markdown-it 15 preserves brackets in IPv6 URL hosts and treats Unicode punctuation as the end of an automatically detected URL: `https://example.com/foo、bar` links only `https://example.com/foo`. Explicit linkification options retain earlier option choices, rather than every parser edge case. Raw HTML remains escaped, and the rendered result passes through the existing tag, attribute and HTTP/HTTPS/mailto scheme allowlists.
+
 ### Browser entry and owner console
 
 `GET /` explains the sharing handoff and links to `/new`. Pairing displays the code's remaining lifetime, clears an expired code, offers retry and manual-copy fallback, and directs the user back to Imnota for upload progress and the resulting link. The browser page does not poll or claim to detect code consumption.

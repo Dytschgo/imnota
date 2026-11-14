@@ -370,6 +370,8 @@ export async function writeArchive(directory, images) {
 
 function markdownRenderer() {
   const renderer = new MarkdownIt({ html: false, linkify: true, typographer: false, breaks: true });
+  // Preserve earlier linkification option choices; parser edge cases can still change.
+  renderer.linkify.set({ fuzzyLink: true, fuzzyEmail: true, fuzzyIP: false, urlAuth: true });
   const originalLinkOpen =
     renderer.renderer.rules.link_open ??
     ((tokens, index, options, _environment, self) => self.renderToken(tokens, index, options));

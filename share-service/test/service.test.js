@@ -163,6 +163,19 @@ async function share(instance, overrides = {}) {
   return instance.api.post('/api/shares').set('Authorization', `Bearer ${uploadToken}`).send(body);
 }
 
+async function assertRecipientMarkdownCases(instance, cases) {
+  for (const { name, markdown, html } of cases) {
+    const created = await share(instance, { markdown, images: [], includeArchive: false });
+    assert.equal(created.status, 201, `${name}: ${created.text}`);
+    const publicToken = created.body.url.split('/').at(-1);
+    const page = await instance.api.get(`/s/${publicToken}`).expect(200);
+    const rendered = page.text.match(
+      /<section class="legacy-prompt">[\s\S]*?<article tabindex="0">([\s\S]*?)<\/article>/,
+    )?.[1];
+    assert.equal(rendered, html, name);
+  }
+}
+
 function v1Fingerprint(upload, expiresInDays = 1) {
   const hash = createHash('sha256');
   const append = (value) => {
@@ -411,6 +424,74 @@ test('keeps archive directory traversal compatible with the patched matcher depe
   assert.deepEqual(entries.get('bundle/image.png'), onePixelPng);
   assert.equal(entries.get('filtered/nested/note.txt').toString(), 'synthetic note');
   assert.equal(entries.has('filtered/image.png'), false);
+});
+
+test('keeps established recipient HTML and sanitizes rendered links', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const cases = [
+    {
+      name: 'bare domain and email',
+      markdown: 'Visit example.com and contact hello@example.com.',
+      html: '<p>Visit <a href="http://example.com" rel="nofollow noreferrer noopener" target="_blank">example.com</a> and contact <a href="mailto:hello@example.com" rel="nofollow noreferrer noopener" target="_blank">hello@example.com</a>.</p>\n',
+    },
+    {
+      name: 'explicit URL and punctuation',
+      markdown: 'Visit example.com, then https://example.com/path. Also example.com、next.',
+      html: '<p>Visit <a href="http://example.com" rel="nofollow noreferrer noopener" target="_blank">example.com</a>, then <a href="https://example.com/path" rel="nofollow noreferrer noopener" target="_blank">https://example.com/path</a>. Also <a href="http://example.com" rel="nofollow noreferrer noopener" target="_blank">example.com</a>、next.</p>\n',
+    },
+    {
+      name: 'URL authentication',
+      markdown: 'Open http://user:pass@example.com/path.',
+      html: '<p>Open <a href="http://user:pass@example.com/path" rel="nofollow noreferrer noopener" target="_blank">http://user:pass@example.com/path</a>.</p>\n',
+    },
+    {
+      name: 'bare IPv4 remains plain text',
+      markdown: 'Bare 127.0.0.1 stays plain.',
+      html: '<p>Bare 127.0.0.1 stays plain.</p>\n',
+    },
+    {
+      name: 'unsafe schemes',
+      markdown: '[script](javascript:alert(1)) [data](data:text/html,hello) [safe](https://example.com)',
+      html: '<p>[script](javascript:alert(1)) [data](data:text/html,hello) <a href="https://example.com" rel="nofollow noreferrer noopener" target="_blank">safe</a></p>\n',
+    },
+    {
+      name: 'raw HTML',
+      markdown: '<script>alert(1)</script> <img src=x onerror=alert(2)>',
+      html: '<p>&lt;script&gt;alert(1)&lt;/script&gt; &lt;img src=x onerror=alert(2)&gt;</p>\n',
+    },
+    {
+      name: 'autolinks',
+      markdown:
+        '<https://example.com/path?q=1> <hello@example.com> <javascript:alert(1)> <data:text/html,hello>',
+      html: '<p><a href="https://example.com/path?q=1" rel="nofollow noreferrer noopener" target="_blank">https://example.com/path?q=1</a> <a href="mailto:hello@example.com" rel="nofollow noreferrer noopener" target="_blank">hello@example.com</a> &lt;javascript:alert(1)&gt; &lt;data:text/html,hello&gt;</p>\n',
+    },
+    {
+      name: 'post-render scheme allowlist',
+      markdown: '[file](ftp://example.com/path)',
+      html: '<p><a rel="nofollow noreferrer noopener" target="_blank">file</a></p>\n',
+    },
+  ];
+
+  await assertRecipientMarkdownCases(instance, cases);
+});
+
+test('records markdown-it 15 IPv6 and Unicode URL parsing changes', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const cases = [
+    {
+      name: 'IPv6 bracket normalization and detection',
+      markdown: '<http://[::1]/path> and http://[::1]/path',
+      html: '<p><a href="http://[::1]/path" rel="nofollow noreferrer noopener" target="_blank">http://[::1]/path</a> and <a href="http://[::1]/path" rel="nofollow noreferrer noopener" target="_blank">http://[::1]/path</a></p>\n',
+    },
+    {
+      name: 'Unicode punctuation ends an explicit URL path',
+      markdown: 'https://example.com/foo、bar',
+      html: '<p><a href="https://example.com/foo" rel="nofollow noreferrer noopener" target="_blank">https://example.com/foo</a>、bar</p>\n',
+    },
+  ];
+  await assertRecipientMarkdownCases(instance, cases);
 });
 
 test('renders no PNG copy controls for an image-free share and keeps mixed image copies per artifact', async (t) => {
