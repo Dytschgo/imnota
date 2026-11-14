@@ -163,6 +163,19 @@ async function share(instance, overrides = {}) {
   return instance.api.post('/api/shares').set('Authorization', `Bearer ${uploadToken}`).send(body);
 }
 
+async function assertRecipientMarkdownCases(instance, cases) {
+  for (const { name, markdown, html } of cases) {
+    const created = await share(instance, { markdown, images: [], includeArchive: false });
+    assert.equal(created.status, 201, `${name}: ${created.text}`);
+    const publicToken = created.body.url.split('/').at(-1);
+    const page = await instance.api.get(`/s/${publicToken}`).expect(200);
+    const rendered = page.text.match(
+      /<section class="legacy-prompt">[\s\S]*?<article tabindex="0">([\s\S]*?)<\/article>/,
+    )?.[1];
+    assert.equal(rendered, html, name);
+  }
+}
+
 function v1Fingerprint(upload, expiresInDays = 1) {
   const hash = createHash('sha256');
   const append = (value) => {
@@ -460,16 +473,7 @@ test('keeps established recipient HTML and sanitizes rendered links', async (t) 
     },
   ];
 
-  for (const { name, markdown, html } of cases) {
-    const created = await share(instance, { markdown, images: [], includeArchive: false });
-    assert.equal(created.status, 201, `${name}: ${created.text}`);
-    const publicToken = created.body.url.split('/').at(-1);
-    const page = await instance.api.get(`/s/${publicToken}`).expect(200);
-    const rendered = page.text.match(
-      /<section class="legacy-prompt">[\s\S]*?<article tabindex="0">([\s\S]*?)<\/article>/,
-    )?.[1];
-    assert.equal(rendered, html, name);
-  }
+  await assertRecipientMarkdownCases(instance, cases);
 });
 
 test('records markdown-it 15 IPv6 and Unicode URL parsing changes', async (t) => {
@@ -487,16 +491,7 @@ test('records markdown-it 15 IPv6 and Unicode URL parsing changes', async (t) =>
       html: '<p><a href="https://example.com/foo" rel="nofollow noreferrer noopener" target="_blank">https://example.com/foo</a>、bar</p>\n',
     },
   ];
-  for (const { name, markdown, html } of cases) {
-    const created = await share(instance, { markdown, images: [], includeArchive: false });
-    assert.equal(created.status, 201, `${name}: ${created.text}`);
-    const publicToken = created.body.url.split('/').at(-1);
-    const page = await instance.api.get(`/s/${publicToken}`).expect(200);
-    const rendered = page.text.match(
-      /<section class="legacy-prompt">[\s\S]*?<article tabindex="0">([\s\S]*?)<\/article>/,
-    )?.[1];
-    assert.equal(rendered, html, name);
-  }
+  await assertRecipientMarkdownCases(instance, cases);
 });
 
 test('renders no PNG copy controls for an image-free share and keeps mixed image copies per artifact', async (t) => {
