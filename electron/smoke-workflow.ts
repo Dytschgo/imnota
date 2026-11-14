@@ -1557,10 +1557,10 @@ async function captureWorkspaceMatrix(
         'none',
       ),
     );
-    await driver.click({ selector: '.settings-navigation button', text: 'What’s new', exact: true });
-    await driver.waitFor({ selector: '.whats-new-settings' });
+    await driver.click({ selector: '.settings-navigation button', text: 'Updates & about', exact: true });
+    await driver.waitFor({ selector: '#onboarding-settings-title' });
     await assertSettingsCardSpacing(driver);
-    await driver.evaluate(`document.querySelector('.whats-new-settings').scrollIntoView({ block: 'start' })`);
+    await driver.evaluate(`document.querySelector('.update-settings').scrollIntoView({ block: 'start' })`);
     artifacts.push(
       await driver.capture(
         artifactDirectory,
