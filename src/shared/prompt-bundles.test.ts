@@ -84,6 +84,41 @@ describe('prompt note mapping', () => {
 });
 
 describe('prompt bundle planning', () => {
+  it('exports comparison roles across split bundles without reordering, and reports missing/excluded counterparts', () => {
+    const input = collection([
+      screenshot('one', 0),
+      screenshot('two', 1),
+      screenshot('three', 2, { includeInExport: false }),
+    ]);
+    input.comparison = { kind: 'current-expected', leftId: 'two', rightId: 'one' };
+    const result = planPromptBundles(input, [rendered('one'), rendered('two')], {
+      breakBeforeScreenshotIds: new Set(['two']),
+    });
+    expect(result.kind).toBe('ready');
+    if (result.kind !== 'ready') throw new Error('Missing bundle plan');
+    expect(
+      result.bundles.flatMap((bundle) =>
+        bundle.pictures.map((picture) => [picture.screenshotId, picture.comparisonRole]),
+      ),
+    ).toEqual([
+      ['one', 'Expected'],
+      ['two', 'Current'],
+    ]);
+    for (const bundle of result.bundles)
+      expect(bundle.markdown).toContain('Current: Picture 2; Expected: Picture 1');
+    const identified = applyPromptBundleMarkdownIdentity(result, {
+      setName: 'Reviewed export - 261106-010203',
+    });
+    for (const bundle of identified.bundles)
+      expect(bundle.markdown).toContain('Current: Picture 2; Expected: Picture 1');
+    input.comparison = { kind: 'before-after', leftId: 'gone', rightId: 'three' };
+    const partial = planPromptBundles(input, [rendered('one'), rendered('two')]);
+    if (partial.kind !== 'ready') throw new Error('Missing partial plan');
+    expect(partial.bundles[0].markdown).toContain(
+      'Before: screenshot unavailable; After: Picture 3 (excluded)',
+    );
+    expect(partial.bundles[0].pictures.map((picture) => picture.screenshotId)).toEqual(['one', 'two']);
+  });
   it('numbers before filtering, keeps creation-order notes, and repeats exclusions in every bundle', () => {
     const input = collection([
       screenshot('third', 30, {
@@ -191,6 +226,28 @@ describe('prompt bundle planning', () => {
     );
     expect(result.bundles[0].markdown).not.toContain('Source size: 3840×2160');
     expect(result.bundles[0].markdown).not.toContain('Source size: 1600×1200');
+  });
+
+  it('writes recorded source info under the picture heading only when present', () => {
+    const input = collection([
+      screenshot('captured', 0, {
+        source: {
+          via: 'capture',
+          capturedAt: '2026-10-10T10:15:00.000Z',
+          app: 'Google Chrome',
+          windowTitle: 'Checkout - Google Chrome',
+        },
+      }),
+      screenshot('plain', 1),
+    ]);
+    const result = planPromptBundles(input, [rendered('captured'), rendered('plain')]);
+    expect(result.kind).toBe('ready');
+    if (result.kind !== 'ready') return;
+    const markdown = result.bundles[0].markdown;
+    expect(markdown).toContain(
+      'Source size: 100×100\n\nSource:\n- App: Google Chrome\n- Window: Checkout - Google Chrome\n- Captured: ',
+    );
+    expect(markdown.match(/^Source:$/gm)).toHaveLength(1);
   });
 
   it('preserves meaningful Markdown indentation in context, descriptions, and text notes', () => {

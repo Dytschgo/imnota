@@ -22,6 +22,11 @@ import { IconButton } from '../components/ui';
 import './content-editors.css';
 import '../components/canvas-surface.css';
 import { DrawingSourceError, isAllowedDrawingElement, parseDrawingSource } from './drawing-render';
+import { detectShortcutPlatform, formatShortcut } from '../../shared/shortcuts';
+
+const SHORTCUT_PLATFORM = detectShortcutPlatform();
+/** The drawing engine groups with Cmd+G on macOS and Ctrl+G elsewhere; name only this platform's keys. */
+const GROUP_SHORTCUT = formatShortcut(SHORTCUT_PLATFORM === 'mac' ? 'Meta+G' : 'Ctrl+G', SHORTCUT_PLATFORM);
 
 type DrawingTool =
   'selection' | 'rectangle' | 'ellipse' | 'diamond' | 'frame' | 'text' | 'arrow' | 'line' | 'freedraw';
@@ -187,8 +192,11 @@ export function DrawingEditor({
             </button>
           );
         })}
-        <span className="drawing-editor-shortcut" title="Select shapes and press Ctrl/⌘ + G to group">
-          Group: Ctrl/⌘G
+        <span
+          className="drawing-editor-shortcut"
+          title={`Select shapes and press ${GROUP_SHORTCUT} to group`}
+        >
+          Group: {GROUP_SHORTCUT}
         </span>
         {inspectorRestore}
       </div>

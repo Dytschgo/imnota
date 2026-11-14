@@ -19,8 +19,11 @@ Projects are plain folders containing JSON, Markdown and image files. Local edit
 - Five editable workflow templates for new projects
 - Local content search with links to matching items
 - Separate Markdown/image copy, generated-file access and file-path fallbacks
+- **Copy for terminal**: a short summary plus quoted Markdown and PNG paths that paste into Claude Code, Codex or Copilot CLI, with a WSL (`/mnt/c/...`) variant on Windows
+- Optional read-only local MCP access for agents, including `get_latest_bundle` and `list_new_since` to pick up new feedback
 - Manual local snapshots, optional automatic history and validated restore with safety copies
 - Area, window and display capture on Windows and macOS, saved as PNG screenshots
+- Optional source info, off by default (app, window title, time, display), recorded locally at capture or import, editable per screenshot and written into exported Markdown
 - Mixed collections containing screenshots, Markdown text blocks and Excalidraw drawings
 - Editable local drawing sources with rendered PNG output
 - Editable Konva annotation layer with arrows, lines, shapes, highlights, text, callouts, steps and sensitive-area masks
@@ -121,6 +124,8 @@ On macOS, **Download update** runs the updater bundled in the **currently instal
 
 Run Imnota from a writable, searchable folder you own, such as `~/Applications`, or directly from the standard system `/Applications` folder. The latter must be physical and canonical, owned by `root:admin`, not world-writable, and be writable and searchable by your user, who must belong to its owning admin group. Newly created lock, staging and managed rollback folders are secured and checked for emptiness before use; unexpected contents are preserved and their path reported. An existing managed rollback folder is secured but may retain earlier backups. Only in `/Applications` must the app also belong to you; ask the installer to update an organisation-owned copy, or install your own copy in `~/Applications`. User-owned folders retain their previous behaviour, including apps owned by another account. Foreign-owned old backups in `/Applications` are preserved with a warning. Mounted DMGs are unsupported. Builds containing #260 but not #271 (`0.4.1-nightly.20261015.38694881114`, `0.4.1-nightly.20261015.38730884358` and `0.4.1-nightly.20261016.38866285766`) bundle an updater that refuses system `/Applications` even for an admin with write access. Affected users need one manual reinstall of a build containing this fix, using its downloaded ZIP or DMG, before updates there can work. Selecting a newer release in the old app cannot update that old script. Earlier builds may also need one manual installation to gain the update action and current compatibility checks.
 
+New builds require the bundled native security observer for in-app updates from `/Applications`. If it is missing or cannot confirm that the folder has no extra access rules, the update stops before creating transaction folders; use `~/Applications` or install manually. Older installed nightlies keep their existing updater for the hop to the new build. Native acceptance of this observer is still pending.
+
 Branch and pull request builds never publish releases. Nightly publication runs daily at 02:17 UTC or by manual dispatch for an exact main commit, with quality and all three platform package jobs required before publication. Scheduled runs skip when main has not changed since the latest published nightly; see [nightly build instructions](docs/nightly-builds.md).
 
 ## Project structure
@@ -165,7 +170,7 @@ Combined clipboard copy offers the matching Markdown and PNG together, but the r
 
 ## Privacy and security
 
-Imnota does not require internet access for its core workflow. It has no account, cloud sync or built-in AI provider connection. Imported project files are treated as untrusted data. IPC calls validate and constrain paths to the selected workspace. Report security issues privately as described in [SECURITY.md](SECURITY.md).
+Imnota does not require internet access for its core workflow. It has no account, cloud sync or built-in AI provider connection. Imported project files are treated as untrusted data. Source info (window titles, app names, times) stays in your project and is exported only in bundles you share; turn it off under Settings → Features. IPC calls validate and constrain paths to the selected workspace. Report security issues privately as described in [SECURITY.md](SECURITY.md).
 
 Hosted links are accessible to anyone who has the URL until revoked or expired. Review the upload manifest before sharing sensitive content. The service receives the approved PNG/Markdown artifacts; it does not receive the editable project folder. See [sharing instructions](docs/user-guide.md#share-a-hosted-link) and the [service operations guide](share-service/docs/hostinger-deployment.md).
 

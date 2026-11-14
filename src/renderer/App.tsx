@@ -75,6 +75,7 @@ import {
 } from './capture/capture-destination';
 import { WhatsNewDialog, type WhatsNewAction } from './components/WhatsNew';
 import { findWhatsNewRelease, shouldShowWhatsNew } from '../shared/whats-new';
+import { splitDiagnosticReference, userFacingErrorMessage } from './user-facing-error';
 
 export { CollectionControls } from './collection/CollectionRail';
 export { SettingsView } from './settings/SettingsView';
@@ -108,10 +109,7 @@ type ToastNotification = {
   projectPath: string | null;
 };
 
-export function userFacingErrorMessage(message: string): string {
-  const withoutIpcWrapper = message.replace(/^Error invoking remote method '[^']+':\s*/i, '');
-  return withoutIpcWrapper.replace(/^(?:Error(?:[.:]\s*|\s+))+/i, '') || 'Something went wrong. Try again.';
-}
+export { userFacingErrorMessage };
 
 export default function App() {
   const store = useAppStore(
@@ -287,6 +285,7 @@ export default function App() {
   const promptBundles = usePromptBundleController({
     getSavedContext: getSavedPromptContext,
     getIncludeRecognisedText: () => preferences.settings.promptExport.includeRecognisedText,
+    getIncludeSourceContext: () => preferences.settings.promptExport.includeSourceContext,
   });
   const handlePromptAction = useCallback(
     async (action: ReturnType<typeof promptBundles.open>) => {
@@ -1206,6 +1205,11 @@ export default function App() {
             collectionId: target.collectionId,
           }),
         );
+        if ('quickAccess' in result) {
+          await persistence.cancelNativeMutation(nativeMutationToken);
+          nativeMutationToken = null;
+          return;
+        }
         const accepted = await finishCapturedScreenshot(
           result.snapshot,
           result.screenshotId,
@@ -1263,6 +1267,11 @@ export default function App() {
             ...(delaySeconds ? { delaySeconds } : {}),
           }),
         );
+        if ('quickAccess' in result) {
+          await persistence.cancelNativeMutation(nativeMutationToken);
+          nativeMutationToken = null;
+          return;
+        }
         if ('buffered' in result) {
           pendingOverlayAction.current = result.overlayAction;
           await persistence.cancelNativeMutation(nativeMutationToken);
@@ -2328,6 +2337,7 @@ export default function App() {
             onShortcutChange={preferences.saveShortcuts}
             globalCaptureShortcutRegistered={preferences.capabilities.globalCaptureShortcutRegistered}
             onPromptExportChange={preferences.savePromptExport}
+            onCaptureChange={preferences.saveCapture}
             projects={store.projects}
             onBackupChange={preferences.saveBackups}
             onBeforeBackupAction={prepareBackupAction}
@@ -2412,6 +2422,7 @@ export default function App() {
           />
         ) : (
           <Workspace
+            sourceContextEnabled={preferences.settings.promptExport.includeSourceContext}
             content={contentPersistence.content}
             contentLoading={contentPersistence.loading}
             contentSaveState={contentPersistence.saveState}
@@ -2599,7 +2610,7 @@ export default function App() {
       {visibleError && (
         <div className="toast error-toast" role="alert" data-testid="error-toast">
           <CircleAlert size={16} aria-hidden="true" />
-          <span>{userFacingErrorMessage(visibleError)}</span>
+          <ErrorToastMessage message={userFacingErrorMessage(visibleError)} />
           {permissionHelp && visibleError === permissionHelp.message && (
             <button
               type="button"
@@ -2747,6 +2758,22 @@ export default function App() {
         />
       )}
     </>
+  );
+}
+
+/** Keeps the message one text run (`message [Diagnostic reference: …]`) for copying and checks. */
+function ErrorToastMessage({ message }: { message: string }) {
+  const { text, reference } = splitDiagnosticReference(message);
+  return (
+    <span>
+      {text}
+      {reference && (
+        <>
+          {' '}
+          <span className="toast-reference">[Diagnostic reference: {reference}]</span>
+        </>
+      )}
+    </span>
   );
 }
 

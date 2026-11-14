@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { terminalUpdateArguments } from './terminal-update.js';
+import { copyMacSecurityObserver } from './macos-security-observer.js';
 import type { ReleaseCandidate } from './releases.js';
 import { UpdateFailure } from './update-controller.js';
 
@@ -99,7 +100,14 @@ export class MacUpdateSession {
  */
 export async function startMacUpdate(
   release: ReleaseCandidate,
-  options: { appPath: string; appPid: number; helperPath: string; cachePath: string; currentVersion: string },
+  options: {
+    appPath: string;
+    appPid: number;
+    helperPath: string;
+    cachePath: string;
+    currentVersion: string;
+    observerPath?: string;
+  },
   events: SessionEvents,
   pollMs = 250,
 ): Promise<MacUpdateSession> {
@@ -113,6 +121,7 @@ export async function startMacUpdate(
   try {
     await fs.copyFile(options.helperPath, helper);
     await fs.chmod(helper, 0o700);
+    if (options.observerPath) await copyMacSecurityObserver(options.observerPath, directory);
     log = await fs.open(logPath, 'a', 0o600);
     reader = await fs.open(logPath, 'r');
     child = spawn('/bin/bash', [helper, '--in-app', String(options.appPid), ...args], {

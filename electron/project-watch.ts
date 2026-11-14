@@ -160,6 +160,27 @@ export class ProjectWatchManager {
     for (const watchId of [...this.watches.keys()]) this.stop(watchId);
   }
 
+  /** A separate native surface committed files without updating the watching renderer. */
+  async notifyProjectChanged(projectPath: string, message: string): Promise<void> {
+    const resolved = path.resolve(projectPath);
+    const watchers = [...this.watches.values()].filter(
+      (state) => path.resolve(state.projectPath) === resolved,
+    );
+    if (!watchers.length) return;
+    const projectRevision = projectRevisionForSource(await this.dependencies.readProjectSource(projectPath));
+    for (const state of watchers) {
+      if (this.watches.get(state.watchId) !== state) continue;
+      this.dependencies.emit({
+        watchId: state.watchId,
+        projectPath: state.projectPath,
+        kind: 'external-change',
+        projectRevision,
+        changedPaths: ['project.json'],
+        message,
+      });
+    }
+  }
+
   stopProject(projectPath: string): void {
     const resolved = path.resolve(projectPath);
     for (const [watchId, state] of this.watches)

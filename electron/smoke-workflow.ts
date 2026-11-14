@@ -21,8 +21,15 @@ import { findWhatsNewRelease } from '../src/shared/whats-new.js';
 import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
 import { planHostedShares, hostedShareSummary } from './hosted-share-plan.js';
 import { exerciseRegionCapture } from './capture-smoke.js';
+import { exerciseQuickCaptures } from './quick-capture-smoke.js';
+import { smokeStringLiteral } from './smoke-string-literal.js';
+import type { QuickCaptureWindow } from './quick-capture-window.js';
+import type { CaptureDisplay } from '../src/shared/capture.js';
+import { exerciseSourceContext } from './source-context-smoke.js';
 import { exerciseNextFeatures, captureNextFeatureLightViews } from './next-features-smoke.js';
 import { exerciseLocalHistory } from './backup-smoke.js';
+import { exerciseAgentHandoff } from './agent-handoff-smoke.js';
+import { exerciseScreenshotComparison } from './screenshot-comparison-smoke.js';
 import type { PersistenceDiagnostics } from './persistence-diagnostics.js';
 import type { WindowsCopyVariantId } from '../src/shared/workflow-bridge.js';
 import {
@@ -39,9 +46,10 @@ import {
   type SmokePoint,
 } from './smoke-native-driver.js';
 
-export type SmokeWorkflowMode = 'smoke' | 'stress' | 'clipboard' | 'faults';
+export type SmokeWorkflowMode = 'smoke' | 'stress' | 'clipboard' | 'faults' | 'quick-capture';
 
 export interface SmokeWorkflowHost {
+  quickCaptures(): QuickCaptureWindow;
   diagnosticsHealth(): ReturnType<PersistenceDiagnostics['health']>;
   /** Update the in-memory production workspace without opening a native chooser. */
   setWorkspace(workspacePath: string): void | Promise<void>;
@@ -53,6 +61,9 @@ export interface SmokeWorkflowHost {
   globalCaptureShortcutRegistered(): boolean;
   /** Read through the production migration, validation, and description hydration path. */
   readProject(projectPath: string): Promise<ProjectData>;
+  listCaptureWindows(
+    displays: readonly CaptureDisplay[],
+  ): Promise<import('./capture-windows.js').CaptureWindowCandidate[]>;
   /** Run the production recovery path with "Restore edits" selected for this test fixture. */
   restoreRecovery(projectPath: string): Promise<ProjectSnapshot>;
   /** Read the persisted legacy update/workspace settings through production code. */
@@ -2962,6 +2973,33 @@ export async function runSmokeWorkflow(
     throw new Error('Updater/channel bridge did not remain offline and idle during smoke.');
   assertions.push('updater bridge and offline smoke state');
 
+  if (mode === 'quick-capture') {
+    // Focus the existing isolated runner on the new native window and its real
+    // capture/clipboard/filesystem paths. The full walkthrough remains a gate.
+    await driver.evaluate(
+      `(async()=>{const result=await window.imnota.setPreferenceSettings({onboarding:{completed:true},updates:{whatsNewAcknowledgedVersion:${smokeStringLiteral(options.version)}}});if(!result.ok)throw new Error(result.error.message);})()`,
+    );
+    driver.setWindow(await host.reopenWindow());
+    await driver.waitFor({ selector: '.library' });
+    const projectPath = await createProjectThroughUi(driver, 'Quick Capture Verification', false);
+    await importImages(driver, projectPath, sources, 3);
+    artifacts.push(...(await exerciseQuickCaptures(host, artifactDirectory)));
+    assertions.push(
+      'persistent quick capture ownership, native copy/drag, compact annotation, exact Add and independent Discard',
+    );
+    const report: SmokeWorkflowReport = {
+      passed: true,
+      version: options.version,
+      mode,
+      artifacts,
+      timings,
+      assertions,
+      diagnosticsHealth: host.diagnosticsHealth(),
+    };
+    await writeReportArtifact(artifactDirectory, report);
+    return report;
+  }
+
   if (mode === 'clipboard') {
     // Focused check of the real export and paste path from the workspace toolbar.
     // Preferences and project files belong to this run's disposable profile.
@@ -3241,6 +3279,10 @@ export async function runSmokeWorkflow(
     assertions.push('deterministic workspace annotations after native pointer checks');
   }
   await captureWorkspaceMatrix(driver, host, projectPath, artifactDirectory, artifacts);
+  artifacts.push(...(await exerciseScreenshotComparison(driver, host, projectPath, artifactDirectory)));
+  assertions.push(
+    'native screenshot comparison selection, both role modes, saved reopen, narrow layout and relationship-only removal',
+  );
   await exercisePreferencesAndChannel(driver, host, projectPath, artifactDirectory, artifacts);
   assertions.push(
     'preferences, performance profile, update channel confirmation and persistence; native solid light text contrast',
@@ -3271,6 +3313,18 @@ export async function runSmokeWorkflow(
   });
   assertions.push(
     'first prompt copy publishes complete PNG/Markdown grants; repeat and Windows variants reuse the set with exact clipboard content',
+  );
+  artifacts.push(
+    ...(await exerciseAgentHandoff(
+      driver,
+      host,
+      projectPath,
+      promptTiming.latestSet.directory,
+      artifactDirectory,
+    )),
+  );
+  assertions.push(
+    'native exact saved agent instruction, off-by-default setup guidance, local MCP Markdown/PNG equality and changed-content handoff retention',
   );
   await closePromptDialog(driver);
 
@@ -3550,10 +3604,17 @@ export async function runSmokeWorkflow(
   await checkpoint('existing image, clipboard, recovery and benchmark checks complete');
   artifacts.push(...(await exerciseMixedContent(driver, host, artifactDirectory)));
   assertions.push(
+    'text and drawing inspector Duplicate is reachable by native Tab and Enter persists each copy',
+  );
+  assertions.push(
     'mixed text/drawing UI, Markdown preview, autosave before navigation, editable scene and white PNG, duplicate/trash/Undo and reopen',
     'Recently deleted restores screenshot, drawing and text through the dialog after Undo toast expiry; success focus and saved/reopened bytes agree',
   );
   artifacts.push(...(await exerciseUiFeedback(driver, host, artifactDirectory)));
+  assertions.push('no-match scope action preserves the query and input focus; canvas hint fits at 110% zoom');
+  assertions.push(
+    'MCP copy failure is announced, retry succeeds, and incomplete guide has an uncompleted state',
+  );
   assertions.push(
     'full Markdown and annotation search targets, project icon/edit CAS, archive scope isolation and restore',
   );
@@ -3568,7 +3629,7 @@ export async function runSmokeWorkflow(
   );
   artifacts.push(...(await exerciseNextFeatures(driver, host, artifactDirectory, checkpoint)));
   assertions.push(
-    'template creation, editable Markdown and reopen, independent clipboard fallbacks, generated paths and read-only focused search',
+    'template creation, editable Markdown and reopen, independent clipboard fallbacks, generated paths, terminal handoff native plain-text paste and read-only focused search',
   );
   await checkpoint('templates, clipboard fallbacks and library search complete; starting local history');
   artifacts.push(...(await exerciseLocalHistory(driver, host, artifactDirectory, checkpoint)));
@@ -3576,6 +3637,8 @@ export async function runSmokeWorkflow(
   await checkpoint('local history restore and reopen complete; capturing light feature views');
   artifacts.push(...(await captureNextFeatureLightViews(driver, artifactDirectory)));
 
+  artifacts.push(...(await exerciseSourceContext(driver, host, fixtureRoot, artifactDirectory)));
+  assertions.push('source opt-in import, inspector edit/reopen/remove and export suppression while off');
   const captureSmoke = await exerciseRegionCapture(driver, host, artifactDirectory);
   if (!captureSmoke.skipped) {
     artifacts.push(...captureSmoke.artifacts);
@@ -3588,6 +3651,10 @@ export async function runSmokeWorkflow(
     );
   }
 
+  artifacts.push(...(await exerciseQuickCaptures(host, artifactDirectory)));
+  assertions.push(
+    'persistent quick capture ownership, native copy, compact annotation, exact Add and independent Discard',
+  );
   await checkpoint('all native workflow checks complete');
   const report: SmokeWorkflowReport = {
     passed: true,

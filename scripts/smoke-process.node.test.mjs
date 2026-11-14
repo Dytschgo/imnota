@@ -84,6 +84,7 @@ describe('native smoke process safety', () => {
   it('selects the focused clipboard workflow explicitly', () => {
     assert.equal(normalizeNativeVerificationMode(), 'smoke');
     assert.equal(normalizeNativeVerificationMode('clipboard'), 'clipboard');
+    assert.equal(normalizeNativeVerificationMode('quick-capture'), 'quick-capture');
     assert.throws(() => normalizeNativeVerificationMode('unknown'), /Unknown native verification mode/);
   });
   it('uses built renderer assets and enables synthetic capture only on supported native platforms', () => {
