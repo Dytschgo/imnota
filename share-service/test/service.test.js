@@ -5,6 +5,7 @@ import { createHash, createHmac, randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { syncBuiltinESMExports } from 'node:module';
 import test from 'node:test';
 import zlib from 'node:zlib';
 import request from 'supertest';
@@ -296,12 +297,75 @@ test('creates, renders and downloads only controlled finalized artifacts', async
   assert.deepEqual(entries.get('prompt-002.png'), secondImage.body);
 });
 
-test('archive source warning removes the partial ZIP before returning an error', async (t) => {
+test('archive entries retain bundle order when filesystem stat callbacks finish out of order', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const directory = path.join(instance.config.dataDir, 'archive-order');
+  await fsp.mkdir(directory);
+  await fsp.writeFile(path.join(directory, 'prompt.md'), '# Ordered');
+  await fsp.writeFile(path.join(directory, 'prompt-001.png'), onePixelPng);
+  await fsp.writeFile(path.join(directory, 'prompt-002.png'), onePixelPng);
+  const originalLstat = fs.lstat;
+  let releaseFirst;
+  let secondDelivered = false;
+  fs.lstat = (file, ...args) => {
+    const callback = args.pop();
+    originalLstat(file, ...args, (error, stats) => {
+      if (file === path.join(directory, 'prompt-001.png') && !secondDelivered) {
+        releaseFirst = () => callback(error, stats);
+        return;
+      }
+      callback(error, stats);
+      if (file === path.join(directory, 'prompt-002.png')) {
+        // Whichever real stat finishes first, deliver image 2 before image 1.
+        secondDelivered = true;
+        releaseFirst?.();
+        releaseFirst = undefined;
+      }
+    });
+  };
+  syncBuiltinESMExports();
+  try {
+    await writeArchive(directory, [{ filename: 'prompt-001.png' }, { filename: 'prompt-002.png' }]);
+    const entries = await archiveEntries(await fsp.readFile(path.join(directory, 'archive.zip')));
+    assert.deepEqual([...entries.keys()], ['prompt.md', 'prompt-001.png', 'prompt-002.png']);
+    assert.equal(entries.get('prompt.md').toString(), '# Ordered');
+    assert.deepEqual(entries.get('prompt-001.png'), onePixelPng);
+    assert.deepEqual(entries.get('prompt-002.png'), onePixelPng);
+  } finally {
+    fs.lstat = originalLstat;
+    syncBuiltinESMExports();
+  }
+});
+
+test('a missing archive source leaves no partial ZIP', async (t) => {
   const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'imnota-archive-test-'));
   t.after(() => fsp.rm(directory, { recursive: true, force: true }));
   await fsp.writeFile(path.join(directory, 'prompt.md'), '# Prompt');
   await assert.rejects(writeArchive(directory, [{ filename: 'missing.png' }]), /missing\.png|ENOENT/u);
   assert.deepEqual(await fsp.readdir(directory), ['prompt.md']);
+});
+
+test('an archive source disappearing after metadata read removes the partial ZIP', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const directory = path.join(instance.config.dataDir, 'archive-source-race');
+  await fsp.mkdir(directory);
+  await fsp.writeFile(path.join(directory, 'prompt.md'), '# Prompt');
+  const imagePath = path.join(directory, 'missing.png');
+  await fsp.writeFile(imagePath, onePixelPng);
+  const originalLstat = fsp.lstat;
+  fsp.lstat = async (file, ...options) => {
+    const stats = await originalLstat(file, ...options);
+    if (file === imagePath) await fsp.unlink(file);
+    return stats;
+  };
+  try {
+    await assert.rejects(writeArchive(directory, [{ filename: 'missing.png' }]), /missing\.png|ENOENT/u);
+    assert.deepEqual(await fsp.readdir(directory), ['prompt.md']);
+  } finally {
+    fsp.lstat = originalLstat;
+  }
 });
 
 test('archive write failure returns an error without a share or staged files', async (t) => {
