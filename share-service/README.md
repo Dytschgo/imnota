@@ -8,6 +8,8 @@ Node 22.13 or newer is required because metadata uses the built-in `node:sqlite`
 
 ZIP generation uses Archiver 8's `ZipArchive` export. Its `readdir-glob` dependency is constrained to 4.0.0 so the service uses patched Minimatch 11 rather than the vulnerable 10.x chain. The override is scoped to Archiver; archive download bytes and directory/glob compatibility are covered by service tests. `yauzl` is a development-only ZIP reader for those checks. Recheck the override when Archiver updates its own dependency range.
 
+ZIP entries retain bundle order: `prompt.md`, then the normalized PNGs. The service resolves their filesystem metadata before submitting them in that order, so asynchronous metadata completion cannot reorder the archive. Missing sources fail before creating the ZIP; later read/write failures remove the partial ZIP before upload rollback.
+
 ```sh
 npm ci
 npm test

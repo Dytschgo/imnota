@@ -336,6 +336,14 @@ function shareReceipt(record, uploadToken, config, assets, recovered = false) {
 
 export async function writeArchive(directory, images) {
   const archivePath = path.join(directory, 'archive.zip');
+  // Archiver's parallel stat queue otherwise appends files in completion order.
+  // Resolve metadata first, then submit entries to its FIFO archive queue in bundle order.
+  const entries = await Promise.all(
+    ['prompt.md', ...images.map((image) => image.filename)].map(async (name) => {
+      const filepath = path.join(directory, name);
+      return { name, filepath, stats: await fsp.lstat(filepath) };
+    }),
+  );
   const output = fs.createWriteStream(archivePath, { mode: 0o600 });
   const archive = new ZipArchive({ zlib: { level: 9 } });
   try {
@@ -345,9 +353,8 @@ export async function writeArchive(directory, images) {
       archive.on('warning', reject);
       archive.on('error', reject);
       archive.pipe(output);
-      archive.file(path.join(directory, 'prompt.md'), { name: 'prompt.md' });
-      for (const image of images) {
-        archive.file(path.join(directory, image.filename), { name: image.filename });
+      for (const entry of entries) {
+        archive.file(entry.filepath, { name: entry.name, stats: entry.stats });
       }
       archive.finalize().catch(reject);
     });
