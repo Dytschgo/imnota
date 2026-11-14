@@ -43,10 +43,13 @@ afterEach(async (context) => {
   try {
     await session.cleanup(context);
   } finally {
-    cleanup();
-    vi.restoreAllMocks();
-    Object.defineProperty(process, 'platform', { value: platform });
-    setReloadProtection(null);
+    try {
+      cleanup();
+    } finally {
+      vi.restoreAllMocks();
+      Object.defineProperty(process, 'platform', { value: platform });
+      setReloadProtection(null);
+    }
   }
 });
 
@@ -882,7 +885,10 @@ it('unsubscribes recovery listeners when their native fixture is disposed', asyn
     expect(f.listeners.size).toBe(0);
     await expect(fs.stat(f.projectPath)).rejects.toMatchObject({ code: 'ENOENT' });
   } finally {
-    cleanup();
-    await owner.cleanup(context.signal);
+    try {
+      cleanup();
+    } finally {
+      await owner.cleanup(context.signal);
+    }
   }
 });
