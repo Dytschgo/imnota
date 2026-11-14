@@ -74,7 +74,7 @@
     "js-yaml": "4.3.2",
     "jsdom": "^25.0.1",
     "konva": "^10.0.3",
-    "lucide-react": "^0.468.0",
+    "lucide-react": "^1.49.0",
     "marked": "15.0.12",
     "pngjs": "7.0.0",
     "postcss": "^8.4.49",
