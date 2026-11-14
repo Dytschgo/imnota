@@ -6,6 +6,8 @@ This standalone Node.js service publishes an explicitly selected, finalized Imno
 
 Node 22.13 or newer is required because metadata uses the built-in `node:sqlite` API.
 
+ZIP generation uses Archiver 8's `ZipArchive` export. Its `readdir-glob` dependency is constrained to 4.0.0 so the service uses patched Minimatch 11 rather than the vulnerable 10.x chain. The override is scoped to Archiver; archive download bytes and directory/glob compatibility are covered by service tests. `yauzl` is a development-only ZIP reader for those checks. Recheck the override when Archiver updates its own dependency range.
+
 ```sh
 npm ci
 npm test
