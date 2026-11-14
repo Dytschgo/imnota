@@ -50,6 +50,7 @@ it.each(['responded', 'rejected', 'hung', 'destroyed', 'capture-hung'])(
       diagnosticsHealth: () => ({ healthy: true }),
       mainWindow: () => ({
         isDestroyed: () => mode === 'destroyed',
+        isFocused: () => false,
         webContents: { executeJavaScript, capturePage },
       }),
     } as unknown as SmokeSessionHost;
@@ -67,6 +68,7 @@ it.each(['responded', 'rejected', 'hung', 'destroyed', 'capture-hung'])(
       },
     });
     if (['responded', 'capture-hung'].includes(mode)) expect(report.rendererState).toEqual(state);
+    expect(report.windowFocused).toBe(mode === 'destroyed' ? undefined : false);
     expect(executeJavaScript).toHaveBeenCalledTimes(mode === 'destroyed' ? 0 : 1);
     if (!['destroyed', 'capture-hung'].includes(mode))
       expect(await fs.readFile(path.join(artifacts, 'failure.png'), 'utf8')).toBe('synthetic capture');

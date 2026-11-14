@@ -12,7 +12,7 @@ import { resolvePreferenceSettings } from '../src/shared/preference-settings.js'
 import { DEFAULT_WORKSPACE_SETTINGS } from '../src/shared/workspace-settings.js';
 import { DEFAULT_PREFERENCE_SETTINGS } from '../src/shared/preferences.js';
 import { emptyProject } from '../src/shared/utils.js';
-import { persistSettings, writeApplicationFile } from './application-persistence.js';
+import { persistSettings, trashApplicationFile, writeApplicationFile } from './application-persistence.js';
 import { CommittedWriteError, atomicWrite, writtenFileIdentity, type WrittenFileEvidence } from './files.js';
 import { PersistenceDiagnostics } from './persistence-diagnostics.js';
 import {
@@ -56,6 +56,71 @@ afterEach(async (context) => {
   }
 });
 
+it('publishes a successful trash before diagnostic completion can let its watch misclassify it', async () => {
+  const target = path.join(root(), 'own-delete.md');
+  await fs.writeFile(target, 'owned');
+  const diagnostics = new PersistenceDiagnostics(() => path.join(root(), 'diagnostics'), {
+    version: 'test',
+    platform,
+  });
+  ledger().diagnostics(diagnostics);
+  const record = diagnostics.record.bind(diagnostics);
+  let release!: () => void;
+  const completion = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let reached!: () => void;
+  const atCompletion = new Promise<void>((resolve) => {
+    reached = resolve;
+  });
+  vi.spyOn(diagnostics, 'record').mockImplementation(async (event) => {
+    if (event.category === 'filesystem' && event.action === 'trash' && event.phase === 'complete') {
+      reached();
+      await completion;
+    }
+    return record(event);
+  });
+  const published = vi.fn();
+  const operation = trashApplicationFile(target, {
+    diagnostics,
+    trash: (file) => fs.unlink(file),
+    recordSelfDelete: published,
+  });
+  await atCompletion;
+  try {
+    await expect(fs.readFile(target)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(published).toHaveBeenCalledExactlyOnceWith(target);
+  } finally {
+    release();
+    await operation;
+  }
+});
+
+it.each(['EIO', 'EACCES', 'EPERM'])(
+  'does not publish a failed trash as a self-delete after %s',
+  async (code) => {
+    const target = path.join(root(), 'kept.md');
+    await fs.writeFile(target, 'preserved');
+    const diagnostics = new PersistenceDiagnostics(() => path.join(root(), 'diagnostics'), {
+      version: 'test',
+      platform,
+    });
+    ledger().diagnostics(diagnostics);
+    const published = vi.fn();
+    await expect(
+      trashApplicationFile(target, {
+        diagnostics,
+        trash: async () => {
+          throw Object.assign(new Error('Trash refused'), { code });
+        },
+        recordSelfDelete: published,
+      }),
+    ).rejects.toMatchObject({ code });
+    expect(published).not.toHaveBeenCalled();
+    expect(await fs.readFile(target, 'utf8')).toBe('preserved');
+  },
+);
+
 it('forwards descriptor evidence through the application write wrapper without changing publication', async () => {
   const target = path.join(root(), 'created.png');
   const diagnostics = new PersistenceDiagnostics(() => path.join(root(), 'diagnostics'), {
@@ -88,6 +153,54 @@ it('forwards descriptor evidence through the application write wrapper without c
   });
   expect(published).toHaveBeenCalledExactlyOnceWith(target, 'OURS');
   expect(invalidated).toHaveBeenCalledExactlyOnceWith(target);
+});
+
+it.each(['observer', 'directory'] as const)(
+  'preserves the committed file when %s fails after ownership publication',
+  async (stage) => {
+    const target = path.join(root(), 'commit-boundary.txt');
+    await fs.writeFile(target, 'before');
+    const published = vi.fn(() => {
+      if (stage === 'observer') throw new Error('Observer failure');
+    });
+    await expect(
+      atomicWrite(
+        target,
+        'after',
+        undefined,
+        {
+          beforeParentSync: async () => {
+            throw new Error('Directory sync failure');
+          },
+        },
+        published,
+      ),
+    ).rejects.toBeInstanceOf(CommittedWriteError);
+    expect(published).toHaveBeenCalledOnce();
+    expect(await fs.readFile(target, 'utf8')).toBe('after');
+    expect((await fs.readdir(root())).some((name) => name.includes('.tmp-'))).toBe(false);
+  },
+);
+
+it('does not publish ownership when the candidate fails before rename', async () => {
+  const target = path.join(root(), 'precommit.txt');
+  await fs.writeFile(target, 'before');
+  const published = vi.fn();
+  await expect(
+    atomicWrite(
+      target,
+      'after',
+      undefined,
+      {
+        beforeCandidateSync: async () => {
+          throw new Error('Candidate failure');
+        },
+      },
+      published,
+    ),
+  ).rejects.not.toBeInstanceOf(CommittedWriteError);
+  expect(published).not.toHaveBeenCalled();
+  expect(await fs.readFile(target, 'utf8')).toBe('before');
 });
 
 // POSIX uses real directory handles and fsync except the single injected failure.

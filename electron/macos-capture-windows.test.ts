@@ -20,6 +20,19 @@ describe('macOS capture helper boundary', () => {
     ]);
   });
 
+  it('keeps the owning app name the helper reports and ignores an invalid one', () => {
+    const source = JSON.stringify([
+      { id: 'window:11', title: 'Docs', app: 'Safari', bounds: { x: 0, y: 0, width: 400, height: 300 } },
+      { id: 'window:12', title: 'Notes', app: '', bounds: { x: 0, y: 0, width: 400, height: 300 } },
+      { id: 'window:13', title: 'Odd', app: 7, bounds: { x: 0, y: 0, width: 400, height: 300 } },
+    ]);
+    expect(parseMacCaptureWindows(source, displays).map((window) => window.app)).toEqual([
+      'Safari',
+      undefined,
+      undefined,
+    ]);
+  });
+
   it('fails closed on an oversized or malformed helper list', () => {
     expect(() => parseMacCaptureWindows('{}', displays)).toThrow('invalid');
     expect(() =>

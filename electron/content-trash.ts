@@ -1,5 +1,6 @@
 import { RestoreConfirmationError } from './restore-confirmation.js';
 import { retireDeleteJournal } from './delete-retention.js';
+import { LOCAL_TRASH_WARNING, trashWithLocalRecovery } from './trash-fallback.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -548,13 +549,21 @@ export async function deleteContentItemToTrash(
   const staged = await stageDelete(root, project, itemId, operations);
   let { manifest } = staged;
   const metadataPath = path.join(root, 'project.json');
+  let localRecovery = false;
   try {
     manifest = await setPhase(staged.directory, manifest, 'trashing', operations);
     for (const entry of manifest.content) {
       const target = resolveRelative(root, entry.relativePath);
       if (!(await classify(target, staged.directory, entry.bytes)))
         throw new ContentTrashError('baseline-changed', `${entry.relativePath} changed before trashing.`);
-      await trashItem(target);
+      localRecovery =
+        (await trashWithLocalRecovery(
+          target,
+          path.join(staged.directory, entry.bytes.blob!),
+          entry.bytes,
+          trashItem,
+          operations.unlink,
+        )) || localRecovery;
       if ((await readOptional(target)) !== null)
         throw new Error(`${entry.relativePath} remained after the trash operation.`);
     }
@@ -565,12 +574,21 @@ export async function deleteContentItemToTrash(
       throw new Error('project.json did not reach its deleted state.');
     try {
       manifest = await setPhase(staged.directory, manifest, 'deleted', operations);
-      return { project: staged.deletedProject, undoToken: manifest.token };
+      return {
+        project: staged.deletedProject,
+        undoToken: manifest.token,
+        ...(localRecovery ? { warning: LOCAL_TRASH_WARNING } : {}),
+      };
     } catch (error) {
       return {
         project: staged.deletedProject,
         undoToken: manifest.token,
-        warning: `Deletion committed, but content Undo recovery is pending: ${error instanceof Error ? error.message : String(error)}`,
+        warning: [
+          localRecovery ? LOCAL_TRASH_WARNING : '',
+          `Deletion committed, but content Undo recovery is pending: ${error instanceof Error ? error.message : String(error)}`,
+        ]
+          .filter(Boolean)
+          .join(' '),
       };
     }
   } catch (error) {
@@ -578,7 +596,12 @@ export async function deleteContentItemToTrash(
       return {
         project: staged.deletedProject,
         undoToken: manifest.token,
-        warning: `Deletion committed after a recoverable journal error: ${error instanceof Error ? error.message : String(error)}`,
+        warning: [
+          localRecovery ? LOCAL_TRASH_WARNING : '',
+          `Deletion committed after a recoverable journal error: ${error instanceof Error ? error.message : String(error)}`,
+        ]
+          .filter(Boolean)
+          .join(' '),
       };
     try {
       if (!(await classify(metadataPath, staged.directory, manifest.metadataBefore)))

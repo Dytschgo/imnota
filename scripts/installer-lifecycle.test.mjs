@@ -32,6 +32,13 @@ function run(source, body) {
 }
 
 for (const [name, source] of sources) {
+  // Match each script's production rollback location, including interrupted swaps.
+  const rollbackSetup =
+    name === 'install.sh'
+      ? 'backup_path="$stage_dir/previous-Imnota.app"'
+      : `backup_root="$root/.imnota-backups.noindex"
+backup_path="$backup_root/.rollback-$$.app"`;
+
   test(`${name}: missing/failing ps is reported before readiness polling`, () => {
     const result = run(
       source,
@@ -132,12 +139,14 @@ root="$(cd "$root" && pwd -P)"
 trap 'rm -rf "$root"' EXIT
 stage_dir="$root/stage"; staging_directory="$stage_dir"
 app_path="$root/Imnota.app"; application_path="$app_path"
-mkdir -p "$app_path/Contents/MacOS" "$stage_dir/old.app"
-printf old > "$stage_dir/old.app/marker"
+${rollbackSetup}
+mkdir -p "$app_path/Contents/MacOS" "$stage_dir" "$backup_path"
+chmod 700 "$stage_dir" "\${backup_path%/*}"
+printf old > "$backup_path/marker"
 printf new > "$app_path/marker"
 printf '#!/bin/sh\\nexit 0\\n' > "$app_path/Contents/MacOS/Imnota"
 chmod +x "$app_path/Contents/MacOS/Imnota"
-backup_path="$stage_dir/old.app"; rollback_path="$backup_path"; rollback_owned=1
+rollback_path="$backup_path"; rollback_owned=1
 replacement_started=1; replacement_launched=1
 mode=${mode}; alive=1
 executable_path="$app_path/Contents/MacOS/Imnota"
@@ -223,8 +232,10 @@ trap 'rm -rf "$root"' EXIT
 bundle="$root/Imnota.app"
 stage_dir="$root/stage"; staging_directory="$stage_dir"
 app_path="$bundle"; application_path="$bundle"
-backup_path="$stage_dir/old.app"; rollback_path="$backup_path"; rollback_owned=1
-mkdir -p "$bundle/Contents/MacOS" "$backup_path"
+${rollbackSetup}
+rollback_path="$backup_path"; rollback_owned=1
+mkdir -p "$bundle/Contents/MacOS" "$stage_dir" "$backup_path"
+chmod 700 "$stage_dir" "\${backup_path%/*}"
 printf old > "$backup_path/marker"
 printf new > "$bundle/marker"
 printf '#!/bin/sh\\nexit 0\\n' > "$bundle/Contents/MacOS/Imnota"
