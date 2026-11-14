@@ -606,11 +606,7 @@ async function exerciseWhatsNew(
     if (focusedFeature !== actionableFeatures[0].id)
       throw new Error('Native Tab did not reach the first release action from its dedicated tab.');
   }
-  for (const viewport of [
-    { width: 1280, height: 800 },
-    { width: 1080, height: 680 },
-  ]) {
-    await driver.resize(viewport);
+  const assertReleaseCards = async () => {
     await driver.evaluate(`(async () => {
       const section = document.querySelector('.whats-new-settings');
       const images = [...section.querySelectorAll('img')];
@@ -624,6 +620,13 @@ async function exerciseWhatsNew(
         throw new Error('Release cards overflow the settings viewport.');
       grid.scrollTop = 0;
     })()`);
+  };
+  for (const viewport of [
+    { width: 1280, height: 800 },
+    { width: 1080, height: 680 },
+  ]) {
+    await driver.resize(viewport);
+    await assertReleaseCards();
     if (artifactDirectory)
       artifacts.push(
         await driver.capture(
@@ -633,6 +636,16 @@ async function exerciseWhatsNew(
         ),
       );
   }
+  // Interface scale is implemented as the root font size; exercise the same presentation at 110%.
+  const previousFontSize = await driver.evaluate<string>(`(() => {
+    const previous = document.documentElement.style.fontSize;
+    document.documentElement.style.fontSize = '110%';
+    return previous;
+  })()`);
+  await assertReleaseCards();
+  if (artifactDirectory)
+    artifacts.push(await driver.capture(artifactDirectory, '1080x680-whats-new-page-110.png', 'none'));
+  await driver.evaluate(`document.documentElement.style.fontSize = ${JSON.stringify(previousFontSize)}`);
   await driver.resize({ width: 1280, height: 800 });
   await driver.click({ text: 'Replay what’s new', exact: true });
   await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' });
@@ -3187,7 +3200,9 @@ export async function runSmokeWorkflow(
   const projectPath = await createProjectThroughUi(driver, 'Native Verification', true);
   await exerciseWhatsNew(driver, host, options.version, artifactDirectory, artifacts);
   if (findWhatsNewRelease(options.version))
-    assertions.push('eligible nightly What’s new, replay, Later and guided handoff');
+    assertions.push(
+      'installed-build highlights, illustrated settings page, native Tab, replay, Later and related actions',
+    );
   // Use a stable user-facing name while retaining random, isolated filesystem paths.
   // This keeps approved visual captures independent of the temporary workspace name.
   await driver.click({ selector: '[data-testid="collection-picker"]' });
