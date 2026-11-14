@@ -48,11 +48,33 @@ export async function exerciseChromiumClipboardSmoke(
   stage: (message: string) => void = () => undefined,
 ): Promise<void> {
   if (process.platform !== 'win32') return;
-  const source = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
+  const previousFocusedWindow = BrowserWindow.getFocusedWindow();
+  const source = new BrowserWindow({
+    show: false,
+    title: 'Imnota synthetic clipboard fixture',
+    webPreferences: { sandbox: true },
+  });
   const api = loadWindowsClipboardApi();
   const text = `Imnota synthetic browser selection ${randomUUID()}`;
   try {
     await source.loadURL(`data:text/html,<p id="source">${text}</p>`);
+    // Chromium 156 requires the copying document to have focus, even with a user gesture.
+    source.show();
+    source.focus();
+    await source.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+      const check = () => {
+        if (!document.hasFocus()) return;
+        clearTimeout(deadline);
+        window.removeEventListener('focus', check);
+        resolve(true);
+      };
+      const deadline = setTimeout(() => {
+        window.removeEventListener('focus', check);
+        reject(new Error('The synthetic Chromium selection did not receive native focus.'));
+      }, 5_000);
+      window.addEventListener('focus', check);
+      check();
+    })`);
     const copied = await source.webContents.executeJavaScript(
       `
       const range = document.createRange();
@@ -119,5 +141,6 @@ export async function exerciseChromiumClipboardSmoke(
     stage('generated pair confirmed after copying over browser content');
   } finally {
     source.destroy();
+    if (previousFocusedWindow && !previousFocusedWindow.isDestroyed()) previousFocusedWindow.focus();
   }
 }
