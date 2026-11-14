@@ -2493,6 +2493,31 @@ button.icon-button:is(.new-collection-button, .comparison-trigger) svg {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+.whats-new-settings .whats-new-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 21rem), 1fr));
+  gap: 18px;
+}
+.whats-new-settings .whats-new-card {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  align-items: start;
+  align-content: start;
+  gap: 14px;
+  padding-block: 14px;
+  padding-inline: 14px;
+  border-block: 1px solid var(--line);
+  border-inline: 1px solid var(--line);
+  border-radius: 12px;
+}
+.whats-new-settings .whats-new-card-media {
+  block-size: auto;
+  aspect-ratio: 16 / 10;
+  overflow: clip;
+}
+.whats-new-settings .whats-new-card-body {
+  gap: 8px;
+}
 .modal-actions {
   display: flex;
   justify-content: flex-end;

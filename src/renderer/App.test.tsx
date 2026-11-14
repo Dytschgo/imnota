@@ -4871,7 +4871,7 @@ describe('feedback controls', () => {
     expect(screen.queryByTestId('whats-new-dialog')).not.toBeInTheDocument();
     fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
     await screen.findByTestId('settings-view');
-    fireEvent.click(screen.getByRole('button', { name: 'Updates & about' }));
+    fireEvent.click(screen.getByRole('button', { name: 'What’s new' }));
     fireEvent.click(screen.getByRole('button', { name: 'Replay what’s new' }));
     expect(await screen.findByTestId('whats-new-dialog')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Got it' }));

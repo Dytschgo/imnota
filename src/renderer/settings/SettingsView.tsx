@@ -1,6 +1,16 @@
 import { isCommittedWriteWarning } from '../../shared/write-outcome';
 import { refreshCommittedSettings } from './sharing-preferences';
-import { ArrowLeft, FolderOpen, Grid2X2, History, Info, Keyboard, Monitor, Users } from 'lucide-react';
+import {
+  ArrowLeft,
+  FolderOpen,
+  Grid2X2,
+  History,
+  Info,
+  Keyboard,
+  Monitor,
+  Sparkles,
+  Users,
+} from 'lucide-react';
 import { useState } from 'react';
 import type { EffectiveAppearance } from '../app/useAppearance';
 import { Button } from '../components/ui';
@@ -35,6 +45,7 @@ export const SETTINGS_CATEGORIES = [
   'Sharing',
   'Backups & history',
   'Updates & about',
+  'What’s new',
 ] as const;
 export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number];
 
@@ -46,6 +57,7 @@ const CATEGORY_ICONS = {
   Sharing: Users,
   'Backups & history': History,
   'Updates & about': Info,
+  'What’s new': Sparkles,
 } as const;
 
 export interface SettingsViewProps {
@@ -190,9 +202,8 @@ export function SettingsView({
             // The Local history card below explains what a snapshot contains; this line says why to be here.
             <p>Snapshot projects on this device and restore an earlier version when you need it.</p>
           )}
-          {group === 'Updates & about' && (
-            <p>Keep Imnota up to date, learn what’s new, and find helpful resources.</p>
-          )}
+          {group === 'Updates & about' && <p>Keep Imnota up to date and find helpful resources.</p>}
+          {group === 'What’s new' && <p>Explore the highlights bundled with your installed build.</p>}
           {group === 'Shortcuts' && <p>Change keyboard actions while keeping mouse controls available.</p>}
         </div>
       </header>
@@ -220,6 +231,13 @@ export function SettingsView({
         </div>
         <div hidden={group !== 'Updates & about'}>
           <UpdateControl onInstall={onInstall} onDownload={onDownload} />
+          <OnboardingSettings
+            value={preferences.onboarding}
+            onReplay={onReplayOnboarding}
+            disabled={savingPreferences}
+          />
+        </div>
+        <div hidden={group !== 'What’s new'}>
           <WhatsNewSettings
             version={updateStatus?.currentVersion}
             channel={updateStatus?.channel ?? settings.updateChannel}
@@ -230,11 +248,6 @@ export function SettingsView({
             }
             onReplay={onReplayWhatsNew}
             onAction={onWhatsNewAction}
-          />
-          <OnboardingSettings
-            value={preferences.onboarding}
-            onReplay={onReplayOnboarding}
-            disabled={savingPreferences}
           />
         </div>
         {group === 'Backups & history' && (

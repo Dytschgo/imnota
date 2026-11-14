@@ -5,7 +5,8 @@ export interface WhatsNewFeature {
   title: string;
   description: string;
   imageSrc?: string;
-  action?: { kind: 'settings'; category: 'Shortcuts' | 'Updates & about' } | { kind: 'onboarding' };
+  action?:
+    { kind: 'settings'; category: 'Shortcuts' | 'Features' | 'Updates & about' } | { kind: 'onboarding' };
 }
 
 export interface WhatsNewRelease {
@@ -219,6 +220,39 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
         imageSrc: new URL('../renderer/assets/whats-new-040-workspace.png', import.meta.url).href,
         description:
           'Glass is a single switch, Favourites and Archived live in the Library, and rarely used tools and duplicate settings are gone.',
+      },
+    ],
+  },
+  {
+    afterVersion: '0.4.0',
+    channel: 'nightly',
+    title: 'Capture, compare and hand off',
+    summary:
+      'Keep captures handy, show what should change, and give your coding agent the exact saved bundle.',
+    preview: true,
+    features: [
+      {
+        id: 'quick-capture',
+        title: 'Keep a capture ready',
+        description:
+          'Keep pending captures in a compact window. Copy, annotate or add one to a collection when you’re ready; discard only the captures you choose.',
+        imageSrc: new URL('../renderer/assets/whats-new-050-quick-capture.png', import.meta.url).href,
+        action: { kind: 'settings', category: 'Shortcuts' },
+      },
+      {
+        id: 'screenshot-comparison',
+        title: 'Show before and after',
+        description:
+          'Pair existing screenshots as Before / After or Current / Expected. Save the pair to include its roles in prompt bundles without changing collection order.',
+        imageSrc: new URL('../renderer/assets/whats-new-050-comparison.png', import.meta.url).href,
+      },
+      {
+        id: 'exact-agent-handoff',
+        title: 'Send the exact saved context',
+        description:
+          'Copy an instruction for a specific saved bundle. Later edits stay separate. Local agent access is optional and off by default; your agent needs an MCP connection.',
+        imageSrc: new URL('../renderer/assets/whats-new-050-agent-handoff.png', import.meta.url).href,
+        action: { kind: 'settings', category: 'Features' },
       },
     ],
   },

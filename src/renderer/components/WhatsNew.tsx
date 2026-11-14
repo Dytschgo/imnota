@@ -107,7 +107,7 @@ export function WhatsNewSettings({
   return (
     <section className="settings-section whats-new-settings" aria-labelledby="whats-new-title">
       <div className="whats-new-heading">
-        <h2 id="whats-new-title">What’s new</h2>
+        <h2 id="whats-new-title">{release?.title ?? 'Release highlights'}</h2>
         <p>
           {version ? `Imnota ${version}` : 'Installed version unavailable'}
           {installedChannel === 'nightly' ? ' · Nightly preview' : ' · Stable'}
@@ -120,7 +120,7 @@ export function WhatsNewSettings({
         </>
       ) : (
         <p className="helper">
-          Release guidance for this version is not bundled yet. Your update settings still work.
+          Release guidance for this version is not bundled yet. Update controls are in Updates &amp; about.
         </p>
       )}
       <div className="whats-new-actions">

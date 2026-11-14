@@ -595,13 +595,65 @@ async function exerciseWhatsNew(
   await driver.click({ text: 'Later', exact: true });
   await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' }, { absent: true });
   await clickAny(driver, SMOKE_UI_CONTRACT.settings);
-  await driver.click({ text: 'Updates & about', exact: true });
+  await driver.click({ text: 'What’s new', exact: true });
+  await driver.waitFor({ selector: '[data-settings-category="What’s new"] .whats-new-settings' });
+  const actionableFeatures = release.features.filter((feature) => feature.action);
+  if (actionableFeatures[0]) {
+    await driver.press('Tab');
+    const focusedFeature = await driver.evaluate<string | undefined>(
+      `document.activeElement?.closest('[data-whats-new-feature]')?.getAttribute('data-whats-new-feature')`,
+    );
+    if (focusedFeature !== actionableFeatures[0].id)
+      throw new Error('Native Tab did not reach the first release action from its dedicated tab.');
+  }
+  const assertReleaseCards = async () => {
+    await driver.evaluate(`(async () => {
+      const section = document.querySelector('.whats-new-settings');
+      const images = [...section.querySelectorAll('img')];
+      if (images.length !== ${release.features.filter((feature) => feature.imageSrc).length})
+        throw new Error('The installed release is missing a bundled screenshot.');
+      await Promise.all(images.map(image => image.decode()));
+      if (images.some(image => !image.complete || image.naturalWidth === 0))
+        throw new Error('A bundled release screenshot did not load.');
+      if (section.querySelectorAll('[data-whats-new-feature]').length !== ${release.features.length})
+        throw new Error('The installed release does not show all its feature cards.');
+      const grid = document.querySelector('.settings-view > .settings-grid');
+      if (grid.scrollWidth > grid.clientWidth + 1)
+        throw new Error('Release cards overflow the settings viewport.');
+      grid.scrollTop = 0;
+    })()`);
+  };
+  for (const viewport of [
+    { width: 1280, height: 800 },
+    { width: 1080, height: 680 },
+  ]) {
+    await driver.resize(viewport);
+    await assertReleaseCards();
+    if (artifactDirectory)
+      artifacts.push(
+        await driver.capture(
+          artifactDirectory,
+          `${viewport.width}x${viewport.height}-whats-new-page.png`,
+          'none',
+        ),
+      );
+  }
+  // Interface scale is implemented as the root font size; exercise the same presentation at 110%.
+  const previousFontSize = await driver.evaluate<string>(`(() => {
+    const previous = document.documentElement.style.fontSize;
+    document.documentElement.style.fontSize = '110%';
+    return previous;
+  })()`);
+  await assertReleaseCards();
+  if (artifactDirectory)
+    artifacts.push(await driver.capture(artifactDirectory, '1080x680-whats-new-page-110.png', 'none'));
+  await driver.evaluate(`document.documentElement.style.fontSize = ${JSON.stringify(previousFontSize)}`);
+  await driver.resize({ width: 1280, height: 800 });
   await driver.click({ text: 'Replay what’s new', exact: true });
   await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' });
-  const actionableFeatures = release.features.filter((feature) => feature.action);
   for (const [index, feature] of actionableFeatures.entries()) {
     if (index > 0) {
-      await driver.click({ text: 'Updates & about', exact: true });
+      await driver.click({ text: 'What’s new', exact: true });
       await driver.click({ text: 'Replay what’s new', exact: true });
       await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' });
     }
@@ -1521,9 +1573,9 @@ async function captureWorkspaceMatrix(
       ),
     );
     await driver.click({ selector: '.settings-navigation button', text: 'Updates & about', exact: true });
-    await driver.waitFor({ selector: '.whats-new-settings' });
+    await driver.waitFor({ selector: '#onboarding-settings-title' });
     await assertSettingsCardSpacing(driver);
-    await driver.evaluate(`document.querySelector('.whats-new-settings').scrollIntoView({ block: 'start' })`);
+    await driver.evaluate(`document.querySelector('.update-settings').scrollIntoView({ block: 'start' })`);
     artifacts.push(
       await driver.capture(
         artifactDirectory,
@@ -3150,7 +3202,9 @@ export async function runSmokeWorkflow(
   const projectPath = await createProjectThroughUi(driver, 'Native Verification', true);
   await exerciseWhatsNew(driver, host, options.version, artifactDirectory, artifacts);
   if (findWhatsNewRelease(options.version))
-    assertions.push('eligible nightly What’s new, replay, Later and guided handoff');
+    assertions.push(
+      'installed-build highlights, illustrated settings page, native Tab, replay, Later and related actions',
+    );
   // Use a stable user-facing name while retaining random, isolated filesystem paths.
   // This keeps approved visual captures independent of the temporary workspace name.
   await driver.click({ selector: '[data-testid="collection-picker"]' });
