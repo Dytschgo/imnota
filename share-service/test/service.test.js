@@ -297,8 +297,9 @@ test('creates, renders and downloads only controlled finalized artifacts', async
   assert.deepEqual(entries.get('prompt-002.png'), secondImage.body);
 });
 
-test('archive entries retain bundle order when filesystem stat callbacks finish out of order', async () => {
+test('archive entries retain bundle order when filesystem stat callbacks finish out of order', async (t) => {
   const instance = await fixture();
+  t.after(() => instance.destroy());
   const directory = path.join(instance.config.dataDir, 'archive-order');
   await fsp.mkdir(directory);
   await fsp.writeFile(path.join(directory, 'prompt.md'), '# Ordered');
@@ -334,7 +335,6 @@ test('archive entries retain bundle order when filesystem stat callbacks finish 
   } finally {
     fs.lstat = originalLstat;
     syncBuiltinESMExports();
-    await instance.destroy();
   }
 });
 
