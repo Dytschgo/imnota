@@ -928,8 +928,9 @@ async function uiCase(
     await driver.click({ selector: `[data-testid="item-delete-${shot.id}"]` });
     await driver.waitFor({ selector: '.toast-action', text: 'Undo', exact: true });
     const bounds = await driver.waitFor({ selector: '.toast-action', text: 'Undo', exact: true });
+    // Keep the React-owned DOM reference in the renderer; only a cloneable result crosses the bridge.
     await driver.evaluate(
-      `window.__imnotaFaultToast = { element:document.querySelector('.toast-action'), start:performance.now(), generation:document.querySelector('.toast')?.dataset.faultGeneration, duration:Number(document.querySelector('.toast')?.dataset.faultDuration) }`,
+      `void (window.__imnotaFaultToast = { element:document.querySelector('.toast-action'), start:performance.now(), generation:document.querySelector('.toast')?.dataset.faultGeneration, duration:Number(document.querySelector('.toast')?.dataset.faultDuration) })`,
     );
     if (caseId === 'undo-hover')
       driver.browserWindow.webContents.sendInputEvent({
