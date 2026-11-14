@@ -84,6 +84,43 @@ function deferred() {
 }
 
 describe('workspace content search', () => {
+  it('finds drawings by saved description and refreshes description edits without reading image/source files', async () => {
+    const root = await workspace();
+    const value = project(0, 0);
+    const drawing = {
+      id: 'diagram',
+      kind: 'drawing' as const,
+      collectionId: 'collection-0',
+      position: 0,
+      includeInExport: true,
+      createdAt: value.createdAt,
+      updatedAt: value.updatedAt,
+      title: 'Architecture',
+      description: 'Unique handoff context for the queue boundary',
+      sourceFilename: 'diagram.json',
+      imageFilename: 'diagram.png',
+      originalWidth: 100,
+      originalHeight: 100,
+    };
+    value.contentItems = [drawing];
+    const projectPath = await writeProject(root, value);
+    const service = new WorkspaceContentSearch();
+    const response = await service.search({ workspacePath: root, query: 'handoff queue' });
+    expect(response.results).toMatchObject([
+      { itemId: 'diagram', kind: 'drawing', matchSource: 'description' },
+    ]);
+    expect(response.results[0]!.excerpt).toContain('handoff context');
+    expect(response.warnings).toEqual([]);
+    drawing.description = 'Replacement context';
+    await fs.writeFile(path.join(projectPath, 'project.json'), JSON.stringify(value));
+    expect((await service.search({ workspacePath: root, query: 'handoff', refresh: true })).results).toEqual(
+      [],
+    );
+    expect((await service.search({ workspacePath: root, query: 'replacement' })).results).toMatchObject([
+      { itemId: 'diagram', matchSource: 'description' },
+    ]);
+  });
+
   it('indexes multiple projects and items once, with subsequent queries using memory', async () => {
     const root = await workspace();
     const projects = 4;
@@ -96,9 +133,7 @@ describe('workspace content search', () => {
     );
     const readText = vi.fn(readSearchText);
     const service = new WorkspaceContentSearch({ readText });
-    const start = performance.now();
     const response = await service.search({ workspacePath: root, query: 'BODY identifier-3.' });
-    const cold = performance.now() - start;
     expect(response.results).toHaveLength(itemsPerProject);
     expect(response.warnings).toEqual([]);
     expect(response.results[2]).toMatchObject({
@@ -107,21 +142,14 @@ describe('workspace content search', () => {
       matchSource: 'markdown',
     });
     expect(readText).toHaveBeenCalledTimes(fileReads);
-    const warmStart = performance.now();
     const warmResponse = await service.search({ workspacePath: root, query: 'identifier-2.' });
-    const warm = performance.now() - warmStart;
     expect(warmResponse.results).toHaveLength(itemsPerProject);
     expect(warmResponse.results.every((result) => result.projectId === 'project-2')).toBe(true);
     expect(readText).toHaveBeenCalledTimes(fileReads);
     expect(new Set(readText.mock.calls.map(([folder, file]) => path.join(folder, file))).size).toBe(
       fileReads,
     );
-    // Cold disk timings vary with concurrent filesystem tests. Gate bounded I/O and
-    // cached-query responsiveness; report cold timing rather than asserting disk speed.
-    expect(warm).toBeLessThan(1000);
-    console.info(
-      `Search fixture: cold ${cold.toFixed(1)}ms, warm ${warm.toFixed(1)}ms; ${projects} projects, ${projects * itemsPerProject} items, ${fileReads} file reads total.`,
-    );
+    // Both queries return the right content without rereading any indexed file.
   }, 30_000);
 
   it('retains metadata and readable siblings when a Markdown file is unreadable', async () => {

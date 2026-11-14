@@ -7,6 +7,9 @@ import { hideWindowForCapture, restoreWindowAfterCapture } from './capture-windo
 import type { CaptureOverlayOutcome } from './capture-overlay-session.js';
 import { type CapturedDisplayImage, CaptureServiceError } from './capture-service.js';
 import { pathInput } from './ipc-contracts.js';
+import { captureSourceDetails, type CaptureSourceDetails } from './capture-source.js';
+import { createScreenshotSource } from '../src/shared/source-context.js';
+import type { CaptureWindowCandidate } from './capture-windows.js';
 import { NativeWorkflowError } from './workflow-errors.js';
 import { app, desktopCapturer, globalShortcut, screen, shell, systemPreferences } from 'electron';
 import {
@@ -23,6 +26,8 @@ export function registerCaptureIpc(
   host: IpcHost,
 ): void {
   const { handleWorkflow } = router;
+  // Source details and time of a capture buffered until the renderer picks a collection.
+  let pendingCaptureSource: { details: CaptureSourceDetails; capturedAt: Date } | null = null;
   const {
     assertLiveCaptureAdmission,
     assertProjectPath,
@@ -82,7 +87,11 @@ export function registerCaptureIpc(
       ])
       .parse(args);
     assertLiveCaptureAdmission(event, admission);
-    host.pendingCapturePng = null;
+    if (host.quickCaptureAccess?.enabled) host.quickCaptureAccess.store.assertCanCapture();
+    else {
+      host.pendingCapturePng = null;
+      pendingCaptureSource = null;
+    }
     if (process.platform === 'linux')
       throw new NativeWorkflowError(
         'capture-unavailable',
@@ -127,9 +136,12 @@ export function registerCaptureIpc(
     try {
       // Capture before creating the overlay; otherwise the selection UI would
       // be present in the image. Hiding the main window prevents self-capture.
+      await host.quickCaptureAccess?.suspend();
       if (wasVisible) await hideWindowForCapture(host.mainWindow);
       let captured: CapturedDisplayImage[];
       let outcome: CaptureOverlayOutcome;
+      let captureWindows: CaptureWindowCandidate[] = [];
+      let capturedAt = new Date();
       const service = captureService();
       // The overlay toolbar can ask for a fresh still after a countdown; loop until
       // the user selects, cancels, or the overlay fails.
@@ -186,6 +198,7 @@ export function registerCaptureIpc(
               true,
             );
           captured = stableCapture;
+          capturedAt = new Date();
         } catch (error) {
           if (error instanceof NativeWorkflowError) throw error;
           if (error instanceof CaptureServiceError) {
@@ -208,11 +221,8 @@ export function registerCaptureIpc(
         }
         assertLiveCaptureAdmission(event, admission);
         try {
-          outcome = await chooseCaptureRegion(
-            captured,
-            await listIdentifiableCaptureWindows(captured.map(({ display }) => display)),
-            input.overlayMode ?? 'region',
-          );
+          captureWindows = await listIdentifiableCaptureWindows(captured.map(({ display }) => display));
+          outcome = await chooseCaptureRegion(captured, captureWindows, input.overlayMode ?? 'region');
         } catch (error) {
           if (error instanceof CaptureServiceError)
             throw new NativeWorkflowError(
@@ -270,17 +280,41 @@ export function registerCaptureIpc(
         outcome.mode,
       );
       assertLiveCaptureAdmission(event, admission);
+      const details = captureSourceDetails({
+        selection,
+        windowId: outcome.mode === 'window' ? outcome.windowId : undefined,
+        windows: captureWindows,
+        displays: captured.map(({ display }) => display),
+      });
+      if (host.quickCaptureAccess?.enabled) {
+        const captureId = await host.quickCaptureAccess.add(
+          png,
+          host.lastOverlayCommit === 'annotate',
+          host.recordedSource(() => createScreenshotSource({ via: 'capture', now: capturedAt, ...details })),
+        );
+        return { quickAccess: true as const, captureId };
+      }
       if (!safeProjectPath || !input.collectionId) {
         host.pendingCapturePng = png;
+        pendingCaptureSource = { details, capturedAt };
         return { buffered: true as const, overlayAction: host.lastOverlayCommit };
       }
-      const inserted = await insertCapturedPng(safeProjectPath, input.collectionId, png, () =>
-        assertLiveCaptureAdmission(event, admission),
+      const inserted = await insertCapturedPng(
+        safeProjectPath,
+        input.collectionId,
+        png,
+        () => assertLiveCaptureAdmission(event, admission),
+        details,
+        capturedAt,
       );
       return { ...inserted, overlayAction: host.lastOverlayCommit };
     } finally {
+      host.quickCaptureAccess?.resume();
       if (wasVisible && host.mainWindow && !host.mainWindow.isDestroyed()) {
-        restoreWindowAfterCapture(host.mainWindow);
+        if (host.quickCaptureAccess?.enabled) {
+          host.mainWindow.showInactive();
+          host.mainWindow.setOpacity(1);
+        } else restoreWindowAfterCapture(host.mainWindow);
         if (wasFocused) host.mainWindow.focus();
       }
     }
@@ -290,6 +324,7 @@ export function registerCaptureIpc(
       .tuple([z.object({ projectPath: pathInput, collectionId: filenameSchema }).strict()])
       .parse(args);
     assertLiveCaptureAdmission(event, admission);
+    if (host.quickCaptureAccess?.enabled) host.quickCaptureAccess.store.assertCanCapture();
     if (process.platform === 'linux')
       throw new NativeWorkflowError(
         'capture-unavailable',
@@ -325,6 +360,7 @@ export function registerCaptureIpc(
       host.mainWindow && !host.mainWindow.isDestroyed() && host.mainWindow.isFocused(),
     );
     try {
+      await host.quickCaptureAccess?.suspend();
       if (wasVisible) await hideWindowForCapture(host.mainWindow);
       let captured: CapturedDisplayImage[];
       const service = captureService();
@@ -381,15 +417,43 @@ export function registerCaptureIpc(
         'region',
       );
       assertLiveCaptureAdmission(event, admission);
-      return insertCapturedPng(safeProjectPath, input.collectionId, png, () =>
-        assertLiveCaptureAdmission(event, admission),
+      const details = captureSourceDetails({
+        selection: resolved.selection,
+        windows: [],
+        displays: captured.map(({ display }) => display),
+      });
+      if (host.quickCaptureAccess?.enabled)
+        return {
+          quickAccess: true as const,
+          captureId: await host.quickCaptureAccess.add(
+            png,
+            false,
+            host.recordedSource(() =>
+              createScreenshotSource({ via: 'capture', now: new Date(), ...details }),
+            ),
+          ),
+        };
+      return insertCapturedPng(
+        safeProjectPath,
+        input.collectionId,
+        png,
+        () => assertLiveCaptureAdmission(event, admission),
+        details,
       );
     } finally {
+      host.quickCaptureAccess?.resume();
       if (wasVisible && host.mainWindow && !host.mainWindow.isDestroyed()) {
-        restoreWindowAfterCapture(host.mainWindow);
+        if (host.quickCaptureAccess?.enabled) {
+          host.mainWindow.showInactive();
+          host.mainWindow.setOpacity(1);
+        } else restoreWindowAfterCapture(host.mainWindow);
         if (wasFocused) host.mainWindow.focus();
       }
     }
+  });
+  handleWorkflow('workflow:capture:show-quick-access', async (_event, ...args) => {
+    z.tuple([]).parse(args);
+    await host.quickCaptureAccess?.show(true);
   });
   handleWorkflow(
     'workflow:capture:commit-buffered',
@@ -404,16 +468,24 @@ export function registerCaptureIpc(
           'The captured screenshot is no longer available. Capture the region again.',
         );
       const safeProjectPath = await assertProjectPath(input.projectPath);
-      const inserted = await insertCapturedPng(safeProjectPath, input.collectionId, png, () => {
-        if (
-          event.sender.isDestroyed() ||
-          !host.mainWindow ||
-          host.mainWindow.isDestroyed() ||
-          host.mainWindow.webContents !== event.sender
-        )
-          throw new NativeWorkflowError('capture-cancelled', 'Screen capture cancelled.');
-      });
+      const inserted = await insertCapturedPng(
+        safeProjectPath,
+        input.collectionId,
+        png,
+        () => {
+          if (
+            event.sender.isDestroyed() ||
+            !host.mainWindow ||
+            host.mainWindow.isDestroyed() ||
+            host.mainWindow.webContents !== event.sender
+          )
+            throw new NativeWorkflowError('capture-cancelled', 'Screen capture cancelled.');
+        },
+        pendingCaptureSource?.details,
+        pendingCaptureSource?.capturedAt,
+      );
       host.pendingCapturePng = null;
+      pendingCaptureSource = null;
       return inserted;
     },
     true,

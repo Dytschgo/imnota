@@ -43,9 +43,11 @@
   background: transparent;
 }
 
-/* Action-only confirmations need the same horizontal inset as forms. */
+/* Action-only confirmations need the same horizontal inset as forms. Without a body, the
+   form spacing above the buttons left an empty band under the header. */
 .modal-viewport .modal > .modal-actions {
-  padding-inline: 22px;
+  margin-block-start: 0;
+  padding: 14px 22px 18px;
 }
 
 .modal-viewport .modal-form {

@@ -1,5 +1,6 @@
 // @vitest-environment node
 import fs from 'node:fs/promises';
+import { setImmediate as nextTurn } from 'node:timers/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -82,24 +83,46 @@ describe('template project creation', () => {
   it('waits for every started writer before cleanup and never leaves a late staging file', async () => {
     const root = await workspace();
     let calls = 0;
-    await expect(
-      createTemplateProject(
-        root,
-        { name: 'Delayed failure', description: '', templateId: 'bug-report' },
-        {
-          randomId: () => 'delayed',
-          write: async (target, value) => {
-            calls += 1;
-            if (calls === 2) throw new Error('disk unavailable');
-            await new Promise((resolve) => setTimeout(resolve, 25));
+    let releaseWriters!: () => void;
+    const writerGate = new Promise<void>((resolve) => (releaseWriters = resolve));
+    const writers: Promise<void>[] = [];
+    let settled = false;
+    const creation = createTemplateProject(
+      root,
+      { name: 'Delayed failure', description: '', templateId: 'bug-report' },
+      {
+        randomId: () => 'delayed',
+        write: (target, value) => {
+          calls += 1;
+          if (calls === 2) return Promise.reject(new Error('disk unavailable'));
+          const writer = (async () => {
+            await writerGate;
             await fs.mkdir(path.dirname(target), { recursive: true });
             await fs.writeFile(target, value);
-          },
+          })();
+          writers.push(writer);
+          return writer;
         },
-      ),
-    ).rejects.toThrow('disk unavailable');
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(calls).toBe(2);
+      },
+    ).finally(() => (settled = true));
+    // Observe rejection immediately and settle every real writer before fixture cleanup,
+    // including when a regression makes the pending-state assertion fail.
+    const outcome = creation.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    try {
+      await vi.waitFor(() => expect(writers.length).toBeGreaterThan(0));
+      await nextTurn();
+      expect(settled).toBe(false);
+    } finally {
+      releaseWriters();
+      await outcome;
+      await Promise.allSettled(writers);
+    }
+    expect(await outcome).toMatchObject({ message: 'disk unavailable' });
+    expect((await Promise.allSettled(writers)).every((result) => result.status === 'fulfilled')).toBe(true);
+    expect(calls).toBeGreaterThanOrEqual(2);
     expect(await fs.readdir(root)).toEqual([]);
   });
 

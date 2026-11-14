@@ -387,6 +387,20 @@ describe('native smoke driver', () => {
     expect(window.webContents.insertText).toHaveBeenCalledWith('Typed text');
   });
 
+  it.each(['Enter', 'ENTER', 'Return'])(
+    'sends the complete %s sequence for native button activation',
+    async (keyCode) => {
+      const sendInputEvent = vi.fn();
+      const window = { webContents: { sendInputEvent } } as unknown as BrowserWindow;
+      await new NativeUiDriver(window, 100).press(keyCode);
+      expect(sendInputEvent.mock.calls.map(([event]) => event)).toEqual([
+        { type: 'keyDown', keyCode, modifiers: [] },
+        { type: 'char', keyCode: '\r', modifiers: [] },
+        { type: 'keyUp', keyCode, modifiers: [] },
+      ]);
+    },
+  );
+
   it.each([true, false])(
     'requires the trusted drag endpoint before release and fails closed when absent (delivered: %s)',
     async (delivered) => {

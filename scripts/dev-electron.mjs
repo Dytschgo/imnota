@@ -6,9 +6,13 @@ import electron from 'electron';
 
 export const forwardedSignals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 
-export function createElectronEnvironment(sourceEnvironment = process.env) {
+export function createElectronEnvironment(sourceEnvironment = process.env, platform = process.platform) {
   const environment = { ...sourceEnvironment };
-  delete environment.ELECTRON_RUN_AS_NODE;
+  for (const key of Object.keys(environment)) {
+    // Windows resolves environment names without regard to case.
+    const name = platform === 'win32' ? key.toUpperCase() : key;
+    if (name === 'ELECTRON_RUN_AS_NODE') delete environment[key];
+  }
   return environment;
 }
 
