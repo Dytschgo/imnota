@@ -1,9 +1,50 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { emptyProject } from '../utils.js';
-import { validateProject } from '../schema.js';
+import { projectSchema, validateProject } from '../schema.js';
 
 describe('project schema', () => {
+  it('rejects an oversized content list before reading or validating its members', () => {
+    let memberReads = 0;
+    const contentItems = new Proxy(
+      Array.from({ length: 10_001 }, () => null),
+      {
+        get(target, key, receiver) {
+          if (typeof key === 'string' && /^\d+$/.test(key)) memberReads++;
+          return Reflect.get(target, key, receiver);
+        },
+      },
+    );
+    const result = projectSchema.safeParse({
+      ...emptyProject('Oversized', ''),
+      schemaVersion: 4,
+      contentItems,
+    });
+    expect(memberReads).toBe(0);
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error('Oversized content list was accepted.');
+    expect(result.error.issues).toHaveLength(1);
+    expect(result.error.issues[0]).toMatchObject({
+      code: 'too_big',
+      path: ['contentItems'],
+      maximum: 10_000,
+    });
+  });
+
+  it('preserves optional comparisons and missing members for Undo; rejects identical sides', () => {
+    const project = emptyProject('Comparison', '');
+    expect(validateProject(project).collections[0].comparison).toBeUndefined();
+    project.collections[0].comparison = {
+      kind: 'current-expected',
+      leftId: 'deleted-one',
+      rightId: 'deleted-two',
+    };
+    expect(validateProject(JSON.parse(JSON.stringify(project))).collections[0].comparison).toEqual(
+      project.collections[0].comparison,
+    );
+    project.collections[0].comparison.rightId = 'deleted-one';
+    expect(() => validateProject(project)).toThrow(/different screenshots/);
+  });
   it('round-trips allowlisted icons and falls back for unknown future icon keys', () => {
     expect(validateProject({ ...emptyProject('Valid', ''), icon: 'rocket' }).icon).toBe('rocket');
     expect(

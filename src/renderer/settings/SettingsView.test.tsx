@@ -1,7 +1,7 @@
 import { localAgentAccessStdioSnippet } from '../../shared/preferences';
 import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
 import { useAppStore } from '../store';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SettingsView } from './SettingsView';
 
@@ -10,6 +10,24 @@ vi.mock('../components/UpdateControl', () => ({ UpdateControl: () => null }));
 afterEach(cleanup);
 
 describe('SettingsView category navigation', () => {
+  it('opens illustrated nightly notes in their own category without changing the selected update channel', () => {
+    const onAction = vi.fn();
+    render(
+      <SettingsView
+        updateStatus={{ state: 'idle', currentVersion: '0.5.0-nightly.20261114.1', channel: 'stable' }}
+        onWhatsNewAction={onAction}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'What’s new' }));
+    expect(screen.getByRole('button', { name: 'What’s new' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('heading', { name: 'Capture, compare and hand off' })).toBeInTheDocument();
+    expect(screen.getByText('Imnota 0.5.0-nightly.20261114.1 · Nightly preview')).toBeInTheDocument();
+    const notes = screen.getByRole('region', { name: 'Capture, compare and hand off' });
+    expect(notes.querySelectorAll('img')).toHaveLength(3);
+    fireEvent.click(within(notes).getAllByRole('button', { name: 'Try it now' })[1]!);
+    expect(onAction).toHaveBeenCalledExactlyOnceWith({ kind: 'settings', category: 'Features' });
+  });
+
   it('starts on Appearance and keeps its own category when uncontrolled', () => {
     render(<SettingsView />);
     expect(screen.getByRole('button', { name: 'Appearance' })).toHaveAttribute('aria-current', 'page');
@@ -35,6 +53,8 @@ describe('SettingsView category navigation', () => {
     const onAgentAccessChange = vi.fn();
     render(<SettingsView activeCategory="Features" onAgentAccessChange={onAgentAccessChange} />);
     const toggle = screen.getByTestId('agent-access-toggle');
+    expect(screen.getByRole('region', { name: 'MCP access Beta' })).toBeVisible();
+    expect(toggle).toBeVisible();
     expect(toggle).not.toBeChecked();
     expect(screen.getByText('Allow local agent access')).toBeInTheDocument();
     expect(screen.getAllByText(/127\.0\.0\.1:17384\/mcp/).length).toBeGreaterThan(0);
@@ -47,7 +67,7 @@ describe('SettingsView category navigation', () => {
     window.imnota = { copyText } as unknown as typeof window.imnota;
     render(<SettingsView activeCategory="Features" />);
     const section = screen.getByRole('region', { name: 'MCP access Beta' });
-    expect(section).not.toHaveTextContent(/Claude|Cursor/);
+    expect(section).not.toHaveTextContent(/\b(?:Claude|Cursor)\b/);
     const prompt = screen.getByTestId('agent-access-prompt').textContent ?? '';
     expect(prompt).toContain('http://127.0.0.1:17384/mcp');
     expect(prompt).toContain('--mcp');
@@ -59,24 +79,41 @@ describe('SettingsView category navigation', () => {
       'list_collections',
       'list_collection_items',
       'get_latest_bundle',
+      'list_new_since',
       'get_bundle',
+      'inspect_bundle',
       'get_item',
       'search_saved_text',
     ])
       expect(prompt).toContain(tool);
     expect(prompt).toContain('Allow local agent access');
-    expect(prompt).not.toMatch(/Claude|Cursor/);
+    expect(prompt).not.toMatch(/\b(?:Claude|Cursor)\b/);
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy prompt' }));
     await screen.findByRole('button', { name: 'Copied' });
     expect(copyText).toHaveBeenCalledExactlyOnceWith(prompt);
   });
 
-  it('replays what’s new from Updates & about', () => {
+  it('says when the MCP setup prompt could not be copied', async () => {
+    window.imnota = {
+      copyText: vi.fn(async () => {
+        throw new Error('Clipboard unavailable');
+      }),
+    } as unknown as typeof window.imnota;
+    render(<SettingsView activeCategory="Features" />);
+    const section = screen.getByRole('region', { name: 'MCP access Beta' });
+    fireEvent.click(within(section).getByRole('button', { name: 'Copy prompt' }));
+    await within(section).findByRole('button', { name: 'Copy failed' });
+    expect(within(section).getByRole('status')).toHaveTextContent(
+      'Setup prompt could not be copied. Select the text and copy it instead.',
+    );
+  });
+
+  it('replays what’s new from its dedicated category', () => {
     const onReplayWhatsNew = vi.fn();
     render(
       <SettingsView
-        activeCategory="Updates & about"
+        activeCategory="What’s new"
         updateStatus={{ state: 'idle', currentVersion: '0.2.8', channel: 'stable' }}
         onReplayWhatsNew={onReplayWhatsNew}
       />,

@@ -360,6 +360,70 @@ function engine(
 }
 
 describe('prompt export controller orchestration', () => {
+  test('reviews the exact saved handoff after edits and opens its original files without regeneration', async () => {
+    const context = savedContext([screenshot(0)]);
+    const fake = fakeBridge();
+    const rendering = fakeRendering();
+    fake.bridge.getPromptExportAgentHandoff = vi.fn(async ({ sessionId, bundleNumber }) =>
+      ok({
+        bundleId: 'b_' + '1'.repeat(32),
+        setName: 'Saved export',
+        collectionName: 'Checkout review',
+        bundleNumber,
+        instruction: `Read saved ${sessionId}`,
+        agentAccessEnabled: true,
+      }),
+    );
+    const controller = engine(async () => context, fake.bridge, rendering.rendering);
+    expect((await controller.prepareFreshFiles()).ok).toBe(true);
+    const receipt = controller.getState().savedHandoff!;
+    const originalMarkdown = fake.writes[0].markdown;
+    const current = await controller.inspectAgentHandoff(receipt.selection);
+    expect(current).toMatchObject({
+      ok: true,
+      value: { freshness: 'current', pictureNumbers: [1], textCount: 0 },
+    });
+    context.snapshot.project.screenshots[0].description = 'Changed after handoff';
+    await controller.open();
+    expect(controller.getState().savedHandoff).toEqual(receipt);
+    const changed = await controller.inspectAgentHandoff(receipt.selection);
+    expect(changed).toMatchObject({
+      ok: true,
+      value: { freshness: 'changed', instruction: 'Read saved session-1' },
+    });
+    expect((await controller.openSavedFiles(receipt.selection)).ok).toBe(true);
+    expect(fake.opens).toEqual([
+      { sessionId: 'session-1', bundleNumber: 1, target: 'png' },
+      { sessionId: 'session-1', bundleNumber: 1, target: 'markdown' },
+    ]);
+    expect(fake.starts).toHaveLength(1);
+    expect(fake.writes[0].markdown).toBe(originalMarkdown);
+  });
+
+  test('never substitutes a new export for a missing grant or an instruction-only request', async () => {
+    const context = savedContext([screenshot(0)]);
+    const fake = fakeBridge();
+    const controller = engine(async () => context, fake.bridge, fakeRendering().rendering);
+    await controller.open();
+    const unsaved = controller.getState().cards[0];
+    expect((await controller.inspectAgentHandoff({ planId: unsaved.planId, bundleNumber: 1 })).ok).toBe(
+      false,
+    );
+    expect(fake.starts).toHaveLength(0);
+    await controller.prepareFreshFiles();
+    const selection = controller.getState().savedHandoff!.selection;
+    fake.bridge.getPromptExportAgentHandoff = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: 'bundle-not-found' as const, message: 'Saved export was removed.', retryable: false },
+    }));
+    expect(await controller.inspectAgentHandoff(selection)).toMatchObject({
+      ok: false,
+      error: { message: expect.stringContaining('no longer available') },
+    });
+    expect((await controller.openSavedFiles(selection)).ok).toBe(false);
+    expect(fake.starts).toHaveLength(1);
+    expect(fake.opens).toHaveLength(0);
+  });
   test('numbers the full scope before exclusion and shares creation-order note references', async () => {
     const screenshots = [screenshot(0), screenshot(1, false), screenshot(2)];
     const annotations: Record<string, Annotation[]> = {
@@ -1133,6 +1197,20 @@ describe('prompt export controller orchestration', () => {
       outcome: 'paths',
       filenames: ['Prompt-1.md', 'Prompt-1.png'],
     });
+  });
+
+  test('copies the terminal hand-off and its WSL variant through the main-owned grant', async () => {
+    const native = fakeBridge();
+    const renderer = fakeRendering();
+    const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
+    await controller.open();
+    expect((await controller.copyForTerminal(controller.getState().cards[0])).ok).toBe(true);
+    expect((await controller.copyForTerminal(1, true)).ok).toBe(true);
+    expect(native.copies).toEqual([
+      { sessionId: 'session-1', bundleNumber: 1, target: 'terminal' },
+      { sessionId: 'session-1', bundleNumber: 1, target: 'terminal-wsl' },
+    ]);
+    expect(controller.getState().cards[0]).toMatchObject({ outcome: 'terminal' });
   });
 
   test('reports a partial Windows clipboard write and points at the separate fallback', async () => {

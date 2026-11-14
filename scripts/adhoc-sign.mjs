@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 
-function bundleMacCaptureHelper(bundle) {
-  const source = fileURLToPath(new URL('../native/macos-capture-helper.swift', import.meta.url));
+function bundleMacHelper(bundle, name, sourceName, compiler) {
+  const source = fileURLToPath(new URL(`../native/${sourceName}`, import.meta.url));
   const resources = path.join(bundle, 'Contents', 'Resources');
   const temporary = mkdtempSync(path.join(os.tmpdir(), 'imnota-capture-helper-'));
   try {
@@ -19,11 +19,11 @@ function bundleMacCaptureHelper(bundle) {
         [
           '--sdk',
           'macosx',
-          'swiftc',
-          '-O',
+          compiler,
+          compiler === 'clang' ? '-O2' : '-O',
           '-target',
           `${architecture}-apple-macos13.0`,
-          '-sdk',
+          compiler === 'clang' ? '-isysroot' : '-sdk',
           sdk,
           source,
           '-o',
@@ -34,11 +34,11 @@ function bundleMacCaptureHelper(bundle) {
       return output;
     });
     mkdirSync(resources, { recursive: true });
-    const target = path.join(resources, 'imnota-capture-helper');
+    const target = path.join(resources, name);
     execFileSync('/usr/bin/lipo', ['-create', ...slices, '-output', target], { stdio: 'inherit' });
     const architectureList = execFileSync('/usr/bin/lipo', ['-archs', target], { encoding: 'utf8' });
     if (!architectureList.includes('arm64') || !architectureList.includes('x86_64'))
-      throw new Error('The bundled macOS capture helper is not universal.');
+      throw new Error(`The bundled macOS helper ${name} is not universal.`);
     execFileSync('/usr/bin/codesign', ['--force', '--sign', '-', '--timestamp=none', target], {
       stdio: 'inherit',
     });
@@ -55,7 +55,8 @@ export default async function adhocSign(context) {
   // Their signatures differ and must not be introduced before the merge.
   if (/^mac-universal-(?:x64|arm64)-temp$/.test(path.basename(context.appOutDir))) return;
   const bundle = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
-  bundleMacCaptureHelper(bundle);
+  bundleMacHelper(bundle, 'imnota-capture-helper', 'macos-capture-helper.swift', 'swiftc');
+  bundleMacHelper(bundle, 'imnota-security-observer', 'macos-security-observer.c', 'clang');
   execFileSync('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', '--timestamp=none', bundle], {
     stdio: 'inherit',
   });

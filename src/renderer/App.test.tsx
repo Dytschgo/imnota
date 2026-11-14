@@ -434,6 +434,51 @@ describe('feedback controls', () => {
     expect(library.queryByRole('button', { name: /^Old/ })).not.toBeInTheDocument();
   });
 
+  it('shows archived projects and archived collections as two groups under the Archived filter', async () => {
+    const openCollection = (id: string, name: string, archived: boolean) => ({
+      ...snapshot.project.collections[0],
+      id,
+      name,
+      archived,
+    });
+    renderApp({
+      listProjects: async () => [
+        {
+          ...snapshot.project,
+          projectPath: snapshot.projectPath,
+          name: 'Active project',
+          collections: [
+            openCollection('live', 'Live review', false),
+            openCollection('done', 'Old review', true),
+          ],
+        },
+        {
+          ...snapshot.project,
+          id: 'old',
+          projectPath: '/workspace/old',
+          name: 'Old',
+          status: 'archived' as const,
+          collections: [openCollection('inside', 'Inside archived project', true)],
+        },
+      ],
+    });
+    // Archived collections stay out of the active views.
+    await screen.findByRole('group', { name: 'Show projects' });
+    expect(screen.queryByRole('heading', { name: 'Archived collections' })).not.toBeInTheDocument();
+    fireEvent.click(
+      within(screen.getByRole('group', { name: 'Show projects' })).getByRole('button', { name: 'Archived' }),
+    );
+    const projectsGroup = within(await screen.findByRole('group', { name: 'Archived projects' }));
+    expect(projectsGroup.getByRole('button', { name: /^Old/ })).toBeInTheDocument();
+    expect(projectsGroup.queryByText('Active project')).not.toBeInTheDocument();
+    const collectionsGroup = within(screen.getByRole('group', { name: 'Archived collections' }));
+    const row = collectionsGroup.getByRole('button', { name: /Old review/ });
+    expect(row).toHaveTextContent('Active project');
+    expect(collectionsGroup.queryByText('Live review')).not.toBeInTheDocument();
+    // A collection of an archived project is covered by its project row, not listed twice.
+    expect(collectionsGroup.queryByText('Inside archived project')).not.toBeInTheDocument();
+  });
+
   it('resumes the most recent project when no session page is saved', async () => {
     localStorage.removeItem('imnota:last-session');
     const loadProject = vi.fn(async () => snapshot);
@@ -855,6 +900,51 @@ describe('feedback controls', () => {
       settings: { ...state.settings, confirmBeforeDeletion: true },
     }));
   });
+
+  it.each([false, true])(
+    'holds Undo after an unpaired native mouseover, with keyboard focus %s',
+    async (focused) => {
+      useAppStore.setState((state) => ({ settings: { ...state.settings, confirmBeforeDeletion: false } }));
+      const undoDeleteScreenshot = vi.fn<ImnotaBridge['undoDeleteScreenshot']>(async () => snapshot);
+      await renderEditingProject({
+        deleteScreenshot: vi.fn(async () => ({ snapshot, undoToken: 'undo' })),
+        undoDeleteScreenshot,
+      });
+      vi.useFakeTimers();
+      try {
+        fireEvent.click(screen.getByRole('button', { name: /^Delete screenshot:/ }));
+        await act(async () => {
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+        const undo = screen.getByRole('button', { name: 'Undo' });
+        const rail = screen.getByLabelText('Content sequence');
+        const text = document.querySelector('.toast > span')!;
+        // Replays the native trace: managed relatedTarget, with no preceding mouseout.
+        fireEvent.mouseOver(undo, { relatedTarget: rail });
+        if (focused) fireEvent.focus(undo);
+        // Moving between descendants must neither release nor duplicate a hover hold.
+        fireEvent.mouseOut(undo, { relatedTarget: text });
+        fireEvent.mouseOver(text, { relatedTarget: undo });
+        act(() => vi.advanceTimersByTime(TOAST_ACTION_MS + 1));
+        expect(undo).toBeInTheDocument();
+        fireEvent.mouseOut(text, { relatedTarget: rail });
+        if (focused) {
+          act(() => vi.advanceTimersByTime(TOAST_ACTION_MS + 1));
+          expect(undo).toBeInTheDocument();
+          fireEvent.blur(undo, { relatedTarget: rail });
+        }
+        act(() => vi.advanceTimersByTime(TOAST_ACTION_MS - 1));
+        expect(undo).toBeInTheDocument();
+        act(() => vi.advanceTimersByTime(2));
+        expect(undo).not.toBeInTheDocument();
+        expect(undoDeleteScreenshot).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+        useAppStore.setState((state) => ({ settings: { ...state.settings, confirmBeforeDeletion: true } }));
+      }
+    },
+  );
 
   it('does not adopt a Recently deleted restore after a different project opens', async () => {
     const deleted = {
@@ -2034,18 +2124,17 @@ describe('feedback controls', () => {
     await waitFor(() => expect(annotationCanvasSpy.mock.calls.at(-1)?.[0]).toMatchObject({ tool: 'text' }));
   });
 
-  it('runs an available Terminal update from the app banner', async () => {
+  it('downloads an available update from the app banner', async () => {
     const downloadUpdate = vi.fn(async () => {});
     renderApp({
       getUpdateStatus: async () => ({
         state: 'available',
         version: '0.3.0',
-        terminalCommand: '/bin/bash /tmp/imnota-update/Update.command',
         message: 'Stable 0.3.0 is available. Nightly remains selected for future checks.',
       }),
       downloadUpdate,
     });
-    const update = await screen.findByRole('button', { name: 'Run update in Terminal' });
+    const update = await screen.findByRole('button', { name: 'Download update' });
     fireEvent.click(update);
     fireEvent.focus(update);
     expect(screen.getByRole('dialog', { name: 'Update status' })).toHaveTextContent(
@@ -3449,11 +3538,19 @@ describe('feedback controls', () => {
     const file = new File(['slow'], 'slow.png', { type: 'image/png' });
     fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [file] } });
     await waitFor(() => expect(importImageFiles).toHaveBeenCalledOnce());
-    fireEvent.change(screen.getByRole('textbox', { name: 'Overall context' }), {
-      target: { value: 'Typed during slow import' },
-    });
-    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 800)));
-    expect(saveMetadata).not.toHaveBeenCalled();
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(screen.getByRole('textbox', { name: 'Overall context' }), {
+        target: { value: 'Typed during slow import' },
+      });
+      // Run past the 700 ms metadata autosave debounce without waiting in real time.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(800);
+      });
+      expect(saveMetadata).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
 
     const original = editingSnapshot.project.screenshots[0]!;
     importedRef.current = {
@@ -4460,7 +4557,7 @@ describe('feedback controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
-    await screen.findByRole('heading', { name: 'Archived projects' });
+    await screen.findByRole('heading', { name: 'Archived', level: 1 });
     fireEvent.click(screen.getByTestId('library-full-search'));
     await screen.findByTestId('global-search-input');
     await waitFor(() =>
@@ -4774,7 +4871,7 @@ describe('feedback controls', () => {
     expect(screen.queryByTestId('whats-new-dialog')).not.toBeInTheDocument();
     fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
     await screen.findByTestId('settings-view');
-    fireEvent.click(screen.getByRole('button', { name: 'Updates & about' }));
+    fireEvent.click(screen.getByRole('button', { name: 'What’s new' }));
     fireEvent.click(screen.getByRole('button', { name: 'Replay what’s new' }));
     expect(await screen.findByTestId('whats-new-dialog')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Got it' }));

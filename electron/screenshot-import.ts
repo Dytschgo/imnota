@@ -5,6 +5,7 @@ import { nowIso } from '../src/shared/utils.js';
 import { ensureCollection } from './collections.js';
 import { withCreatedFileCleanup } from './created-file-cleanup.js';
 import type { IpcHost } from './main.js';
+import type { ScreenshotSource } from '../src/shared/source-context.js';
 
 export async function importScreenshot(
   host: Pick<IpcHost, 'atomicWrite' | 'readProject' | 'uniqueStoredName' | 'nextScreenshotPosition'>,
@@ -12,6 +13,7 @@ export async function importScreenshot(
   sourcePath: string,
   originalFilename = path.basename(sourcePath),
   collectionId?: string,
+  source?: ScreenshotSource,
 ): Promise<void> {
   const { atomicWrite, readProject, uniqueStoredName, nextScreenshotPosition } = host;
   const ext = path.extname(originalFilename).toLowerCase();
@@ -47,6 +49,7 @@ export async function importScreenshot(
       originalWidth: image.getSize().width,
       originalHeight: image.getSize().height,
       includeInExport: true,
+      ...(source ? { source } : {}),
     });
     const added = project.screenshots.at(-1)!;
     const annotationPath = path.join(projectPath, added.annotationFile);

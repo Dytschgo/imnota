@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { UpdateChannel } from '../src/shared/types.js';
 
 const repository = 'https://github.com/Dytschgo/imnota';
-const api = 'https://api.github.com/repos/Dytschgo/imnota/releases';
+export const RELEASES_API_URL = 'https://api.github.com/repos/Dytschgo/imnota/releases';
 // Match only the two version formats Imnota publishes; no loose coercion.
 const versionPattern =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-nightly\.(\d{8})\.([1-9]\d*)(?:\.([1-9]\d*))?)?$/;
@@ -149,7 +149,7 @@ export async function discoverRelease(
     return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
   }
   async function discoverStable() {
-    const value = await read(`${api}/latest`, true);
+    const value = await read(`${RELEASES_API_URL}/latest`, true);
     if (value === null) return null;
     const candidate = selectRelease(value, 'stable', platform);
     if (!candidate) throw new Error('The stable release is incomplete for this platform. Try again later.');
@@ -163,7 +163,7 @@ export async function discoverRelease(
   let reachedEnd = false;
   // Bound pagination, and fail rather than reporting a false up-to-date result.
   for (let page = 1; page <= 10; page++) {
-    const value = await read(`${api}?per_page=100&page=${page}`);
+    const value = await read(`${RELEASES_API_URL}?per_page=100&page=${page}`);
     if (!Array.isArray(value) || value.length > 100) throw new Error('Invalid release listing.');
     for (const item of value) {
       const candidate = selectRelease(item, 'nightly', platform);

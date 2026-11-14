@@ -8,6 +8,19 @@ import {
 } from '../whats-new';
 
 describe('what’s new releases', () => {
+  it('keeps the illustrated upcoming nightly highlights separate from Stable and older nightlies', () => {
+    const release = findWhatsNewRelease('0.5.0-nightly.20261114.1');
+    expect(release?.preview).toBe(true);
+    expect(release?.features.map((feature) => feature.id)).toEqual([
+      'quick-capture',
+      'screenshot-comparison',
+      'exact-agent-handoff',
+    ]);
+    expect(release?.features.every((feature) => feature.imageSrc?.includes('whats-new-050-'))).toBe(true);
+    expect(findWhatsNewRelease('0.4.0-nightly.20261114.1')?.features[0]?.id).toBe('capture-all-displays');
+    expect(findWhatsNewRelease('0.4.0')?.features[0]?.id).toBe('capture-timing');
+  });
+
   it('gates release content at the nightly boundary and preserves stable releases', () => {
     expect(findWhatsNewRelease('0.2.9-nightly.20260924.36070290089')?.features.at(-1)?.id).toBe(
       'capture-choose-display',

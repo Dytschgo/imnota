@@ -1,6 +1,6 @@
 import { versionStaticHead } from './static-assets.js';
 import { sharePage } from './share-page.js';
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import express from 'express';
 import { rateLimit } from 'express-rate-limit';
 import fs from 'node:fs';
@@ -334,27 +334,44 @@ function shareReceipt(record, uploadToken, config, assets, recovered = false) {
   };
 }
 
-async function writeArchive(directory, images) {
+export async function writeArchive(directory, images) {
   const archivePath = path.join(directory, 'archive.zip');
-  await new Promise((resolve, reject) => {
-    const output = fs.createWriteStream(archivePath, { mode: 0o600 });
-    const archive = archiver('zip', { zlib: { level: 9 } });
-    output.once('close', () => resolve(undefined));
-    output.once('error', reject);
-    archive.once('warning', reject);
-    archive.once('error', reject);
-    archive.pipe(output);
-    archive.file(path.join(directory, 'prompt.md'), { name: 'prompt.md' });
-    for (const image of images) {
-      archive.file(path.join(directory, image.filename), { name: image.filename });
-    }
-    archive.finalize().catch(reject);
-  });
+  // Archiver's parallel stat queue otherwise appends files in completion order.
+  // Resolve metadata first, then submit entries to its FIFO archive queue in bundle order.
+  const entries = await Promise.all(
+    ['prompt.md', ...images.map((image) => image.filename)].map(async (name) => {
+      const filepath = path.join(directory, name);
+      return { name, filepath, stats: await fsp.lstat(filepath) };
+    }),
+  );
+  const output = fs.createWriteStream(archivePath, { mode: 0o600 });
+  const archive = new ZipArchive({ zlib: { level: 9 } });
+  try {
+    await new Promise((resolve, reject) => {
+      output.once('close', () => resolve(undefined));
+      output.once('error', reject);
+      archive.on('warning', reject);
+      archive.on('error', reject);
+      archive.pipe(output);
+      for (const entry of entries) {
+        archive.file(entry.filepath, { name: entry.name, stats: entry.stats });
+      }
+      archive.finalize().catch(reject);
+    });
+  } catch (error) {
+    archive.abort();
+    output.destroy();
+    if (!output.closed) await new Promise((resolve) => output.once('close', () => resolve(undefined)));
+    await fsp.rm(archivePath, { force: true });
+    throw error;
+  }
   return (await fsp.stat(archivePath)).size;
 }
 
 function markdownRenderer() {
   const renderer = new MarkdownIt({ html: false, linkify: true, typographer: false, breaks: true });
+  // Preserve earlier linkification option choices; parser edge cases can still change.
+  renderer.linkify.set({ fuzzyLink: true, fuzzyEmail: true, fuzzyIP: false, urlAuth: true });
   const originalLinkOpen =
     renderer.renderer.rules.link_open ??
     ((tokens, index, options, _environment, self) => self.renderToken(tokens, index, options));

@@ -21,11 +21,20 @@ import type { ProjectData, ProjectSnapshot } from '../../shared/types';
 import type { RecentlyDeletedItem, RecentlyDeletedRestoreResult } from '../../shared/recently-deleted';
 import { collectionDisplayName } from './collection-display-name';
 import { RecentlyDeleted } from './RecentlyDeleted';
-import { orderedCollectionItems } from '../../shared/content-items';
+import { orderedCollectionItems, type OrderedCollectionItem } from '../../shared/content-items';
+import { ScreenshotComparison } from './ScreenshotComparison';
 import { detectShortcutPlatform, formatShortcut, shortcutMatchesEvent } from '../../shared/shortcuts';
 import { nowIso } from '../../shared/utils';
 import { Button, IconButton, Modal, TextArea, TextInput } from '../components/ui';
 import { useAppStore } from '../store';
+import { reasonMessage } from '../user-facing-error';
+import { textBlockLabel } from './text-block-label';
+
+/** One name for a rail item's visible label, tooltip and action names. */
+function railItemLabel(item: OrderedCollectionItem): string {
+  if (item.kind === 'text') return textBlockLabel(item.preview);
+  return item.title || (item.kind === 'screenshot' ? item.originalFilename : 'Drawing');
+}
 
 export interface CollectionRailProps {
   onFlush(): Promise<boolean>;
@@ -205,7 +214,7 @@ export function CollectionControls({
       if (createdId) await (onSelectCollection ?? ((id) => store.setActiveCollection(id)))(createdId);
       if (action === 'rename') closeRename();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'The collection could not be saved.');
+      setError(reasonMessage(reason, 'The collection could not be saved.'));
     } finally {
       operationPending.current = false;
       setBusy(false);
@@ -229,15 +238,24 @@ export function CollectionControls({
     <div className="round-controls">
       <div className="collection-control-heading">
         <span className="field-label">Collection</span>
-        <IconButton
-          data-testid="new-collection"
-          className="new-collection-button"
-          label="New collection"
-          disabled={busy}
-          onClick={() => void apply('create')}
-        >
-          <Plus size={14} aria-hidden="true" />
-        </IconButton>
+        <div className="collection-heading-actions">
+          {onSaveProject && (
+            <ScreenshotComparison
+              key={`${store.snapshot?.projectPath}:${store.activeCollectionId}`}
+              onFlush={async () => (await onFlush()) !== false}
+              onSaveProject={onSaveProject}
+            />
+          )}
+          <IconButton
+            data-testid="new-collection"
+            className="new-collection-button"
+            label="New collection"
+            disabled={busy}
+            onClick={() => void apply('create')}
+          >
+            <Plus size={14} aria-hidden="true" />
+          </IconButton>
+        </div>
       </div>
       <div className="collection-picker" ref={pickerRef}>
         <button
@@ -666,7 +684,7 @@ export function CollectionRail({
                     const next = index + step;
                     if (next >= 0 && next < shots.length) void reorderScreenshot(next, index);
                   }}
-                  title={reorderHint}
+                  title={[railItemLabel(item), reorderHint].filter(Boolean).join('\n')}
                 >
                   <span className="shot-index">{String(index + 1).padStart(2, '0')}</span>
                   <div className="thumb">
@@ -681,11 +699,7 @@ export function CollectionRail({
                     )}
                   </div>
                   <span className="shot-copy">
-                    <strong>
-                      {item.kind === 'text'
-                        ? item.preview || 'Text block'
-                        : item.title || (item.kind === 'screenshot' ? item.originalFilename : 'Drawing')}
-                    </strong>
+                    <strong>{railItemLabel(item)}</strong>
                     <small>
                       {'conflict' in item && item.conflict
                         ? item.includeInExport
@@ -706,8 +720,8 @@ export function CollectionRail({
                     className="shot-visibility"
                     label={
                       item.includeInExport
-                        ? `Exclude ${item.kind === 'text' ? item.preview || 'text block' : item.title} from prompt`
-                        : `Include ${item.kind === 'text' ? item.preview || 'text block' : item.title} in prompt`
+                        ? `Exclude ${railItemLabel(item)} from prompt`
+                        : `Include ${railItemLabel(item)} in prompt`
                     }
                     aria-pressed={item.includeInExport}
                     onPointerDown={(event) => event.stopPropagation()}
@@ -726,7 +740,7 @@ export function CollectionRail({
                     <IconButton
                       className="shot-delete"
                       data-testid={`item-delete-${item.id}`}
-                      label={`Delete ${item.kind === 'text' ? 'text block' : item.kind}: ${item.kind === 'text' ? item.preview || 'Text block' : item.title}`}
+                      label={`Delete ${item.kind === 'text' ? 'text block' : item.kind}: ${railItemLabel(item)}`}
                       {...(deleteShortcut && item.id === store.activeScreenshotId
                         ? { title: `Delete (${deleteShortcut})` }
                         : {})}

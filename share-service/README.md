@@ -6,6 +6,10 @@ This standalone Node.js service publishes an explicitly selected, finalized Imno
 
 Node 22.13 or newer is required because metadata uses the built-in `node:sqlite` API.
 
+ZIP generation uses Archiver 8's `ZipArchive` export. Its `readdir-glob` dependency is constrained to 4.0.0 so the service uses patched Minimatch 11 rather than the vulnerable 10.x chain. The override is scoped to Archiver; archive download bytes and directory/glob compatibility are covered by service tests. `yauzl` is a development-only ZIP reader for those checks. Recheck the override when Archiver updates its own dependency range.
+
+ZIP entries retain bundle order: `prompt.md`, then the normalized PNGs. The service resolves their filesystem metadata before submitting them in that order, so asynchronous metadata completion cannot reorder the archive. Missing sources fail before creating the ZIP; later read/write failures remove the partial ZIP before upload rollback.
+
 ```sh
 npm ci
 npm test
@@ -87,6 +91,8 @@ Expected upload codes are `invalid_token` or `pairing_expired` (401), `pairing_u
 - `GET /api/shares` with a management bearer returns the single record controlled by that token. Its `url` is `null`; raw public tokens are deliberately unrecoverable and the desktop holds the URL locally.
 - `GET /api/shares/receipt/:requestId` with the original upload bearer recovers a committed receipt for 24 hours without resending artifact data.
 - `POST /api/shares/:id/revoke` with that share's management bearer immediately disables public access and is idempotent.
+
+Recipient Markdown links bare domains and email addresses while leaving bare IPv4 addresses as text. Markdown-it 15 preserves brackets in IPv6 URL hosts and treats Unicode punctuation as the end of an automatically detected URL: `https://example.com/foo、bar` links only `https://example.com/foo`. Explicit linkification options retain earlier option choices, rather than every parser edge case. Raw HTML remains escaped, and the rendered result passes through the existing tag, attribute and HTTP/HTTPS/mailto scheme allowlists.
 
 ### Browser entry and owner console
 

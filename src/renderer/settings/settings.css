@@ -151,11 +151,19 @@
   border-top: 1px solid var(--line);
 }
 
-.imnota-preference-fieldset legend {
+/* A plain legend is drawn inside the fieldset's top border, which put "Accent" on the
+   divider with the padding below it. Floating it keeps it in the padded content box. */
+.imnota-preference-fieldset > legend {
+  float: inline-start;
+  inline-size: 100%;
   padding: 0;
   color: var(--ink);
   font-size: 12px;
   font-weight: 650;
+}
+
+.imnota-preference-fieldset > legend + * {
+  clear: both;
 }
 
 .imnota-preference-fieldset > p {
@@ -351,6 +359,11 @@
   flex: none;
   margin-top: 1px;
   color: var(--imnota-accent-hover);
+}
+
+/* Not completed is neutral, not an accent-coloured success mark. */
+.imnota-completion-state:not([data-completed]) svg {
+  color: var(--ink-4);
 }
 
 .imnota-secondary-button,
