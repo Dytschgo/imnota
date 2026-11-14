@@ -610,6 +610,8 @@ async function exerciseWhatsNew(
     await driver.evaluate(`(async () => {
       const section = document.querySelector('.whats-new-settings');
       const images = [...section.querySelectorAll('img')];
+      if (images.length !== ${release.features.filter((feature) => feature.imageSrc).length})
+        throw new Error('The installed release is missing a bundled screenshot.');
       await Promise.all(images.map(image => image.decode()));
       if (images.some(image => !image.complete || image.naturalWidth === 0))
         throw new Error('A bundled release screenshot did not load.');
