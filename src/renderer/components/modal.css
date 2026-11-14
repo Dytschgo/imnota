@@ -1,7 +1,10 @@
-/* The body portal escapes filtered glass panels and their overflow clipping. */
+/* The body portal escapes filtered glass panels and their overflow clipping.
+   Window drag regions (top bar, sidebar header) ignore stacking order, so the
+   backdrop opts out; otherwise clicks near the top of the window drag it. */
 .modal-backdrop.modal-viewport {
   z-index: 100;
   padding: clamp(8px, 2vw, 20px);
+  -webkit-app-region: no-drag;
 }
 
 .modal-viewport[hidden] {
@@ -40,9 +43,11 @@
   background: transparent;
 }
 
-/* Action-only confirmations need the same horizontal inset as forms. */
+/* Action-only confirmations need the same horizontal inset as forms. Without a body, the
+   form spacing above the buttons left an empty band under the header. */
 .modal-viewport .modal > .modal-actions {
-  padding-inline: 22px;
+  margin-block-start: 0;
+  padding: 14px 22px 18px;
 }
 
 .modal-viewport .modal-form {
@@ -62,4 +67,11 @@
 .modal-preview .modal-header {
   align-items: center;
   padding: 10px 14px;
+}
+
+/* macOS draws the traffic lights over the top-left corner of the window, where
+   the full-window preview header starts. Clear them like the app top bar does:
+   the 80px window-controls inset less the 8px preview backdrop padding. */
+:root:has(.platform-mac) .modal-preview .modal-header {
+  padding-left: 72px;
 }

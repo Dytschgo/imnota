@@ -8,8 +8,12 @@ import {
   MAX_PROMPT_BUNDLE_PNG_BYTES,
   PromptBundleStore,
 } from './prompt-bundle-store.js';
-import { PromptBundleWorkflow } from './prompt-bundle-workflow.js';
+import { workflowOutcome } from './workflow-errors.js';
+import { promptCollectionGrant, PromptBundleWorkflow } from './prompt-bundle-workflow.js';
 import { TemporaryFileHandoffStore } from './onboarding-handoff.js';
+import { promptBundleId } from './prompt-bundle-identity.js';
+import { createMcpTools, handleMcpJsonRpc } from './mcp-server.js';
+import { emptyProject } from '../src/shared/utils.js';
 
 const temporary: string[] = [];
 afterEach(async () => {
@@ -22,9 +26,11 @@ function pngDataUrl(): string {
 
 const manifest = [{ bundleNumber: 1, width: 1, height: 1 }];
 
-async function fixture() {
-  const projectPath = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-workflow-')));
-  temporary.push(projectPath);
+async function fixture(nested = false) {
+  const workspacePath = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-workflow-')));
+  temporary.push(workspacePath);
+  const projectPath = nested ? path.join(workspacePath, 'Project') : workspacePath;
+  await fs.mkdir(projectPath, { recursive: true });
   const collectionId = '001-collection';
   await fs.mkdir(path.join(projectPath, 'collections', collectionId), { recursive: true });
   const handoffRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-prompt-handoff-')));
@@ -59,7 +65,7 @@ async function fixture() {
     {
       authorize: async (candidate, candidateCollection) => {
         if (candidate !== projectPath || candidateCollection !== collectionId)
-          throw new Error('Collection does not belong to the project.');
+          return promptCollectionGrant(candidate, candidateCollection, []);
         return { projectPath, collectionId, collectionName: 'Collection' };
       },
       copyContext,
@@ -75,6 +81,7 @@ async function fixture() {
     }),
   );
   return {
+    workspacePath,
     workflow,
     projectPath,
     collectionId,
@@ -88,6 +95,74 @@ async function fixture() {
 }
 
 describe('main-owned prompt bundle grants', () => {
+  it('identifies the exact finalized export and retrieves its matching Markdown and image through MCP', async () => {
+    const { workflow, projectPath, workspacePath, collectionId } = await fixture(true);
+    await fs.writeFile(
+      path.join(projectPath, 'project.json'),
+      JSON.stringify(emptyProject('Collection', '')),
+    );
+    const session = await workflow.start(projectPath, collectionId, manifest);
+    await workflow.write(session.sessionId, 1, pngDataUrl(), '# Exact saved evidence\n');
+    await expect(workflow.describeSaved(session.sessionId, 1)).rejects.toMatchObject({
+      code: 'session-not-found',
+    });
+    await workflow.finish(session.sessionId);
+    const saved = await workflow.describeSaved(session.sessionId, 1);
+    expect(saved).toMatchObject({ projectPath, collectionId, setName: session.setName });
+    const id = promptBundleId(
+      path.relative(workspacePath, projectPath).split(path.sep).join('/'),
+      collectionId,
+      saved.setName,
+    );
+    const tools = createMcpTools({
+      enabled: () => true,
+      workspacePath: () => workspacePath,
+      appVersion: () => 'test',
+    });
+    const response = (await handleMcpJsonRpc(
+      { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_bundle', arguments: { id } } },
+      tools,
+      'test',
+    )) as { result: { content: Array<{ type: string; text?: string; data?: string }>; isError?: boolean } };
+    expect(response.result.isError).not.toBe(true);
+    const metadata = JSON.parse(response.result.content[0].text!);
+    expect(metadata).toMatchObject({
+      id,
+      setName: session.setName,
+      bundles: [{ markdown: '# Exact saved evidence\n' }],
+    });
+    expect(response.result.content[1]).toMatchObject({ type: 'image', data: pngDataUrl().split(',')[1] });
+    const before = await fs.readFile(path.join(projectPath, 'project.json'));
+    await workflow.describeSaved(session.sessionId, 1);
+    expect(await fs.readFile(path.join(projectPath, 'project.json'))).toEqual(before);
+  });
+
+  it('reports missing saved files instead of selecting another export or publishing anything', async () => {
+    const { workflow, projectPath, collectionId } = await fixture();
+    const session = await workflow.start(projectPath, collectionId, manifest);
+    await workflow.write(session.sessionId, 1, pngDataUrl(), '# Saved\n');
+    const final = await workflow.finish(session.sessionId);
+    await fs.unlink(
+      path.join(
+        projectPath,
+        'collections',
+        collectionId,
+        'exports',
+        session.setName,
+        final.bundles[0].pngFilename,
+      ),
+    );
+    await expect(workflow.describeSaved(session.sessionId, 1)).rejects.toMatchObject({
+      code: 'bundle-not-found',
+      message: expect.stringContaining('no longer available'),
+    });
+    await expect(workflow.describeSaved('unknown', 1)).rejects.toMatchObject({ code: 'session-not-found' });
+    expect(
+      (await fs.readdir(path.join(projectPath, 'collections', collectionId, 'exports'))).filter(
+        (name) => !name.startsWith('.'),
+      ),
+    ).toEqual([session.setName]);
+  });
   it('copies validated generated paths as text and preserves the clipboard when a file disappears', async () => {
     const { workflow, projectPath, collectionId, copyText } = await fixture();
     const session = await workflow.start(projectPath, collectionId, manifest);
@@ -100,6 +175,31 @@ describe('main-owned prompt bundle grants', () => {
     expect(copyText).toHaveBeenLastCalledWith(`${markdown}\n${png}`);
     await fs.unlink(png);
     await expect(workflow.copy(session.sessionId, 1, 'paths')).rejects.toThrow();
+    expect(copyText).toHaveBeenCalledTimes(1);
+  });
+
+  it('copies a quoted terminal hand-off with a summary, and a WSL variant only on Windows', async () => {
+    const { workflow, projectPath, collectionId, copyText } = await fixture();
+    const session = await workflow.start(projectPath, collectionId, manifest);
+    await workflow.write(session.sessionId, 1, pngDataUrl(), '# Context\n\nBundle 1 of 1\n');
+    const final = await workflow.finish(session.sessionId);
+    const folder = path.join(projectPath, 'collections', collectionId, 'exports', session.setName);
+    const markdown = path.join(folder, final.bundles[0].markdownFilename);
+    const png = path.join(folder, final.bundles[0].pngFilename);
+    await workflow.copy(session.sessionId, 1, 'terminal');
+    const text = copyText.mock.lastCall?.[0] as string;
+    expect(text.split('\n').slice(0, 1)).toEqual(['Imnota: Context (bundle 1 of 1)']);
+    const quote =
+      process.platform === 'win32' ? (value: string) => `"${value}"` : (value: string) => `'${value}'`;
+    expect(text).toContain(`Markdown: ${quote(markdown)}`);
+    expect(text).toContain(`Image: ${quote(png)}`);
+    expect(text.endsWith('\n')).toBe(false);
+    if (process.platform !== 'win32')
+      await expect(workflow.copy(session.sessionId, 1, 'terminal-wsl')).rejects.toThrow(
+        /only offered on Windows/,
+      );
+    await fs.unlink(png);
+    await expect(workflow.copy(session.sessionId, 1, 'terminal')).rejects.toThrow();
     expect(copyText).toHaveBeenCalledTimes(1);
   });
 
@@ -280,4 +380,42 @@ describe('main-owned prompt bundle grants', () => {
     await expect(workflow.cancel(held.sessionId)).resolves.toEqual(heldResult);
     // This exercises 129 real filesystem sessions, including Windows file operations.
   }, 30_000);
+});
+
+it('reports exact grant errors and directs text-only image/file copies to Copy Markdown only', async () => {
+  const { workflow, projectPath, collectionId } = await fixture();
+  await expect(
+    workflowOutcome(() => workflow.start(projectPath, 'missing', manifest)),
+  ).resolves.toMatchObject({
+    ok: false,
+    error: { code: 'collection-not-found', retryable: false },
+  });
+  await expect(
+    workflowOutcome(() => workflow.write('unknown', 1, pngDataUrl(), '# Context')),
+  ).resolves.toMatchObject({
+    ok: false,
+    error: { code: 'session-not-found', retryable: false },
+  });
+  const session = await workflow.start(projectPath, collectionId, [
+    { bundleNumber: 1, hasImage: false, width: 0, height: 0 },
+  ]);
+  await workflow.write(session.sessionId, 1, undefined, '# Text');
+  await workflow.finish(session.sessionId);
+  for (const target of ['image', 'files', 'files-rich'] as const) {
+    await expect(workflowOutcome(() => workflow.copy(session.sessionId, 1, target))).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: 'clipboard-limit',
+        retryable: false,
+        details: { reason: 'rejected' },
+        message: 'This prompt has no image to copy. Use Copy Markdown only.',
+      },
+    });
+  }
+  await expect(
+    workflowOutcome(() => workflow.write(session.sessionId, 1, undefined, '# Late')),
+  ).resolves.toMatchObject({
+    ok: false,
+    error: { code: 'session-not-found', retryable: false },
+  });
 });

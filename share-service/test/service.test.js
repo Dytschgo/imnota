@@ -5,16 +5,52 @@ import { createHash, createHmac, randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { syncBuiltinESMExports } from 'node:module';
 import test from 'node:test';
 import zlib from 'node:zlib';
 import request from 'supertest';
-import { createService } from '../src/app.js';
+import { fromBuffer } from 'yauzl';
+import { ZipArchive } from 'archiver';
+import { createService, writeArchive } from '../src/app.js';
 import { cleanupExpired, reconcileArtifacts } from '../src/maintenance.js';
 import { backupMetadata } from '../src/metadata-backup.js';
 import { randomToken, tokenHash } from '../src/security.js';
 import { writeShareClipboard } from '../public/share-copy.js';
 
 const origin = 'https://app.imnota.xyz';
+
+async function archiveEntries(bytes) {
+  const zip = await new Promise((resolve, reject) => {
+    fromBuffer(bytes, { lazyEntries: true, strictFileNames: true }, (error, archive) =>
+      error ? reject(error) : resolve(archive),
+    );
+  });
+  try {
+    return await new Promise((resolve, reject) => {
+      const entries = new Map();
+      zip.once('error', reject);
+      zip.once('end', () => resolve(entries));
+      zip.on('entry', async (entry) => {
+        try {
+          assert.equal(entries.has(entry.fileName), false, 'duplicate archive entry');
+          const stream = await new Promise((resolve, reject) => {
+            zip.openReadStream(entry, (error, stream) => (error ? reject(error) : resolve(stream)));
+          });
+          const chunks = [];
+          for await (const chunk of stream) chunks.push(chunk);
+          entries.set(entry.fileName, Buffer.concat(chunks));
+          zip.readEntry();
+        } catch (error) {
+          reject(error);
+        }
+      });
+      zip.readEntry();
+    });
+  } finally {
+    zip.close();
+  }
+}
+
 const receiptSecret = Buffer.alloc(32, 7).toString('base64url');
 const onePixelPng = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -127,6 +163,19 @@ async function share(instance, overrides = {}) {
   return instance.api.post('/api/shares').set('Authorization', `Bearer ${uploadToken}`).send(body);
 }
 
+async function assertRecipientMarkdownCases(instance, cases) {
+  for (const { name, markdown, html } of cases) {
+    const created = await share(instance, { markdown, images: [], includeArchive: false });
+    assert.equal(created.status, 201, `${name}: ${created.text}`);
+    const publicToken = created.body.url.split('/').at(-1);
+    const page = await instance.api.get(`/s/${publicToken}`).expect(200);
+    const rendered = page.text.match(
+      /<section class="legacy-prompt">[\s\S]*?<article tabindex="0">([\s\S]*?)<\/article>/,
+    )?.[1];
+    assert.equal(rendered, html, name);
+  }
+}
+
 function v1Fingerprint(upload, expiresInDays = 1) {
   const hash = createHash('sha256');
   const append = (value) => {
@@ -203,6 +252,10 @@ test('creates, renders and downloads only controlled finalized artifacts', async
   const created = await share(instance, {
     title: '<img src=x onerror=alert(1)>',
     markdown: '# Heading\n\n<script>alert(1)</script>\n\n[bad](javascript:alert(2))',
+    images: [
+      { filename: 'prompt-001.png', dataBase64: onePixelPng.toString('base64') },
+      { filename: 'prompt-002.png', dataBase64: onePixelPng.toString('base64') },
+    ],
   });
   assert.equal(created.status, 201, created.text);
   assert.equal(created.body.title, '<img src=x onerror=alert(1)>');
@@ -236,6 +289,7 @@ test('creates, renders and downloads only controlled finalized artifacts', async
   assert.match(markdown.headers['content-type'], /^text\/markdown/);
   assert.equal(markdown.headers['content-disposition'], 'attachment; filename="prompt.md"');
   const image = await instance.api.get(`/s/${publicToken}/assets/prompt-001.png`).expect(200);
+  const secondImage = await instance.api.get(`/s/${publicToken}/assets/prompt-002.png`).expect(200);
   assert.match(image.headers['content-type'], /^image\/png/);
   assert.equal(image.headers['x-content-type-options'], 'nosniff');
   const zip = await instance.api
@@ -249,6 +303,195 @@ test('creates, renders and downloads only controlled finalized artifacts', async
     .expect(200);
   assert.match(zip.headers['content-type'], /^application\/zip/);
   assert.equal(zip.body.subarray(0, 2).toString(), 'PK');
+  const entries = await archiveEntries(zip.body);
+  assert.deepEqual([...entries.keys()], ['prompt.md', 'prompt-001.png', 'prompt-002.png']);
+  assert.equal(entries.get('prompt.md').toString('utf8'), markdown.text);
+  assert.deepEqual(entries.get('prompt-001.png'), image.body);
+  assert.deepEqual(entries.get('prompt-002.png'), secondImage.body);
+});
+
+test('archive entries retain bundle order when filesystem stat callbacks finish out of order', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const directory = path.join(instance.config.dataDir, 'archive-order');
+  await fsp.mkdir(directory);
+  await fsp.writeFile(path.join(directory, 'prompt.md'), '# Ordered');
+  await fsp.writeFile(path.join(directory, 'prompt-001.png'), onePixelPng);
+  await fsp.writeFile(path.join(directory, 'prompt-002.png'), onePixelPng);
+  const originalLstat = fs.lstat;
+  let releaseFirst;
+  let secondDelivered = false;
+  fs.lstat = (file, ...args) => {
+    const callback = args.pop();
+    originalLstat(file, ...args, (error, stats) => {
+      if (file === path.join(directory, 'prompt-001.png') && !secondDelivered) {
+        releaseFirst = () => callback(error, stats);
+        return;
+      }
+      callback(error, stats);
+      if (file === path.join(directory, 'prompt-002.png')) {
+        // Whichever real stat finishes first, deliver image 2 before image 1.
+        secondDelivered = true;
+        releaseFirst?.();
+        releaseFirst = undefined;
+      }
+    });
+  };
+  syncBuiltinESMExports();
+  try {
+    await writeArchive(directory, [{ filename: 'prompt-001.png' }, { filename: 'prompt-002.png' }]);
+    const entries = await archiveEntries(await fsp.readFile(path.join(directory, 'archive.zip')));
+    assert.deepEqual([...entries.keys()], ['prompt.md', 'prompt-001.png', 'prompt-002.png']);
+    assert.equal(entries.get('prompt.md').toString(), '# Ordered');
+    assert.deepEqual(entries.get('prompt-001.png'), onePixelPng);
+    assert.deepEqual(entries.get('prompt-002.png'), onePixelPng);
+  } finally {
+    fs.lstat = originalLstat;
+    syncBuiltinESMExports();
+  }
+});
+
+test('a missing archive source leaves no partial ZIP', async (t) => {
+  const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'imnota-archive-test-'));
+  t.after(() => fsp.rm(directory, { recursive: true, force: true }));
+  await fsp.writeFile(path.join(directory, 'prompt.md'), '# Prompt');
+  await assert.rejects(writeArchive(directory, [{ filename: 'missing.png' }]), /missing\.png|ENOENT/u);
+  assert.deepEqual(await fsp.readdir(directory), ['prompt.md']);
+});
+
+test('an archive source disappearing after metadata read removes the partial ZIP', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const directory = path.join(instance.config.dataDir, 'archive-source-race');
+  await fsp.mkdir(directory);
+  await fsp.writeFile(path.join(directory, 'prompt.md'), '# Prompt');
+  const imagePath = path.join(directory, 'missing.png');
+  await fsp.writeFile(imagePath, onePixelPng);
+  const originalLstat = fsp.lstat;
+  fsp.lstat = async (file, ...options) => {
+    const stats = await originalLstat(file, ...options);
+    if (file === imagePath) await fsp.unlink(file);
+    return stats;
+  };
+  try {
+    await assert.rejects(writeArchive(directory, [{ filename: 'missing.png' }]), /missing\.png|ENOENT/u);
+    assert.deepEqual(await fsp.readdir(directory), ['prompt.md']);
+  } finally {
+    fsp.lstat = originalLstat;
+  }
+});
+
+test('archive write failure returns an error without a share or staged files', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const originalCreateWriteStream = fs.createWriteStream;
+  fs.createWriteStream = (file, options) => {
+    const output = originalCreateWriteStream(file, options);
+    if (file.endsWith('archive.zip'))
+      output.once('open', () => output.destroy(new Error('simulated archive write failure')));
+    return output;
+  };
+  try {
+    const response = await share(instance);
+    assert.equal(response.status, 500);
+    assert.equal(response.body.error.code, 'internal_error');
+    assert.deepEqual(await fsp.readdir(instance.config.uploadsDir), []);
+    assert.equal(instance.db.prepare('SELECT COUNT(*) AS count FROM shares').get().count, 0);
+    assert.equal(instance.db.prepare('SELECT COUNT(*) AS count FROM staging_uploads').get().count, 0);
+  } finally {
+    fs.createWriteStream = originalCreateWriteStream;
+  }
+});
+
+test('keeps archive directory traversal compatible with the patched matcher dependency', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const directory = path.join(instance.config.dataDir, 'archive-source');
+  await fsp.mkdir(path.join(directory, 'nested'), { recursive: true });
+  await fsp.writeFile(path.join(directory, 'nested', 'note.txt'), 'synthetic note');
+  await fsp.writeFile(path.join(directory, 'image.png'), onePixelPng);
+  const archive = new ZipArchive({ zlib: { level: 9 } });
+  const bytes = (async () => {
+    const chunks = [];
+    for await (const chunk of archive) chunks.push(chunk);
+    return Buffer.concat(chunks);
+  })();
+  archive.directory(directory, 'bundle');
+  archive.glob('**/*.txt', { cwd: directory }, { prefix: 'filtered' });
+  await archive.finalize();
+  const entries = await archiveEntries(await bytes);
+  assert.equal(entries.get('bundle/nested/note.txt').toString(), 'synthetic note');
+  assert.deepEqual(entries.get('bundle/image.png'), onePixelPng);
+  assert.equal(entries.get('filtered/nested/note.txt').toString(), 'synthetic note');
+  assert.equal(entries.has('filtered/image.png'), false);
+});
+
+test('keeps established recipient HTML and sanitizes rendered links', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const cases = [
+    {
+      name: 'bare domain and email',
+      markdown: 'Visit example.com and contact hello@example.com.',
+      html: '<p>Visit <a href="http://example.com" rel="nofollow noreferrer noopener" target="_blank">example.com</a> and contact <a href="mailto:hello@example.com" rel="nofollow noreferrer noopener" target="_blank">hello@example.com</a>.</p>\n',
+    },
+    {
+      name: 'explicit URL and punctuation',
+      markdown: 'Visit example.com, then https://example.com/path. Also example.com、next.',
+      html: '<p>Visit <a href="http://example.com" rel="nofollow noreferrer noopener" target="_blank">example.com</a>, then <a href="https://example.com/path" rel="nofollow noreferrer noopener" target="_blank">https://example.com/path</a>. Also <a href="http://example.com" rel="nofollow noreferrer noopener" target="_blank">example.com</a>、next.</p>\n',
+    },
+    {
+      name: 'URL authentication',
+      markdown: 'Open http://user:pass@example.com/path.',
+      html: '<p>Open <a href="http://user:pass@example.com/path" rel="nofollow noreferrer noopener" target="_blank">http://user:pass@example.com/path</a>.</p>\n',
+    },
+    {
+      name: 'bare IPv4 remains plain text',
+      markdown: 'Bare 127.0.0.1 stays plain.',
+      html: '<p>Bare 127.0.0.1 stays plain.</p>\n',
+    },
+    {
+      name: 'unsafe schemes',
+      markdown: '[script](javascript:alert(1)) [data](data:text/html,hello) [safe](https://example.com)',
+      html: '<p>[script](javascript:alert(1)) [data](data:text/html,hello) <a href="https://example.com" rel="nofollow noreferrer noopener" target="_blank">safe</a></p>\n',
+    },
+    {
+      name: 'raw HTML',
+      markdown: '<script>alert(1)</script> <img src=x onerror=alert(2)>',
+      html: '<p>&lt;script&gt;alert(1)&lt;/script&gt; &lt;img src=x onerror=alert(2)&gt;</p>\n',
+    },
+    {
+      name: 'autolinks',
+      markdown:
+        '<https://example.com/path?q=1> <hello@example.com> <javascript:alert(1)> <data:text/html,hello>',
+      html: '<p><a href="https://example.com/path?q=1" rel="nofollow noreferrer noopener" target="_blank">https://example.com/path?q=1</a> <a href="mailto:hello@example.com" rel="nofollow noreferrer noopener" target="_blank">hello@example.com</a> &lt;javascript:alert(1)&gt; &lt;data:text/html,hello&gt;</p>\n',
+    },
+    {
+      name: 'post-render scheme allowlist',
+      markdown: '[file](ftp://example.com/path)',
+      html: '<p><a rel="nofollow noreferrer noopener" target="_blank">file</a></p>\n',
+    },
+  ];
+
+  await assertRecipientMarkdownCases(instance, cases);
+});
+
+test('records markdown-it 15 IPv6 and Unicode URL parsing changes', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const cases = [
+    {
+      name: 'IPv6 bracket normalization and detection',
+      markdown: '<http://[::1]/path> and http://[::1]/path',
+      html: '<p><a href="http://[::1]/path" rel="nofollow noreferrer noopener" target="_blank">http://[::1]/path</a> and <a href="http://[::1]/path" rel="nofollow noreferrer noopener" target="_blank">http://[::1]/path</a></p>\n',
+    },
+    {
+      name: 'Unicode punctuation ends an explicit URL path',
+      markdown: 'https://example.com/foo、bar',
+      html: '<p><a href="https://example.com/foo" rel="nofollow noreferrer noopener" target="_blank">https://example.com/foo</a>、bar</p>\n',
+    },
+  ];
+  await assertRecipientMarkdownCases(instance, cases);
 });
 
 test('renders no PNG copy controls for an image-free share and keeps mixed image copies per artifact', async (t) => {

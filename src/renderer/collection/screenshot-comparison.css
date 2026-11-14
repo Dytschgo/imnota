@@ -1,0 +1,45 @@
+.comparison-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  overflow-wrap: anywhere;
+}
+.comparison-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 12px;
+}
+.comparison-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 16px;
+}
+.comparison-image {
+  min-inline-size: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.comparison-image h3,
+.comparison-image p {
+  margin: 0;
+}
+.comparison-viewport {
+  block-size: clamp(200px, 45dvh, 600px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.comparison-viewport img {
+  display: block;
+  max-inline-size: none;
+  max-block-size: none;
+  block-size: auto;
+  object-fit: contain;
+}
+.comparison-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

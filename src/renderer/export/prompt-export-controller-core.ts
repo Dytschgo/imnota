@@ -1,3 +1,4 @@
+import type { ExportRecovery } from './export-failure-catalog';
 import type { CollectionContentItem } from '../../shared/markdown';
 import {
   applyPromptBundleMarkdownIdentity,
@@ -9,6 +10,7 @@ import {
 import type { Annotation, ImagePayload, ProjectSnapshot, ScreenshotRecord } from '../../shared/types';
 import type {
   PromptExportBundleContent,
+  PromptExportAgentHandoff,
   PromptExportBundleGrant,
   PromptExportCopyResult,
   PromptExportCopyTarget,
@@ -78,7 +80,11 @@ export interface PromptExportBundleManifestInput {
 }
 
 export interface PromptBundleControllerBridge {
-  copyText?(text: string): Promise<void>;
+  getPromptExportAgentHandoff?(input: {
+    sessionId: string;
+    bundleNumber: number;
+  }): Promise<WorkflowResult<PromptExportAgentHandoff>>;
+  copyPromptExportMarkdown?(text: string): Promise<WorkflowResult<void>>;
   loadScreenshotContent(input: { projectPath: string; screenshot: ScreenshotRecord }): Promise<{
     image: ImagePayload;
     annotations: Annotation[];
@@ -167,6 +173,9 @@ export type PromptBundleControllerErrorCode =
   | 'no-content'
   | 'render-limit'
   | 'save-failed'
+  | 'composition-unavailable'
+  | 'encode-failed'
+  | 'export-incomplete'
   | 'unexpected';
 
 export interface PromptBundleControllerError {
@@ -174,8 +183,11 @@ export interface PromptBundleControllerError {
   message: string;
   retryable: boolean;
   fallbackAvailable: boolean;
+  recovery: ExportRecovery;
   nativeCode?: WorkflowError['code'];
   technicalDetails?: string;
+  /** Selection that published this failure; only matching current cards may use it. */
+  bundle?: PromptBundleActionRequest;
 }
 
 export type PromptBundleControllerActionResult =
@@ -187,6 +199,9 @@ export interface HostedShareArtifacts {
   bundleNumbers: readonly number[];
   imageBundleNumbers: readonly number[];
 }
+
+export type PromptBundleRetryResult =
+  PromptBundleControllerActionResult | { ok: true; value: HostedShareArtifacts };
 
 export interface PromptBundleLargePreview {
   bundleNumber: number;
@@ -200,10 +215,26 @@ export interface PromptBundleControllerState {
   progress?: PromptBundleProgress;
   error?: PromptBundleControllerError;
   isOpen: boolean;
+  savedHandoff?: SavedHandoffReceipt;
   cleanupPending: boolean;
   noContentMessage?: string;
   preview?: PromptBundleLargePreview;
 }
+
+export interface SavedHandoffReceipt {
+  selection: PromptBundleActionRequest;
+  collectionName: string;
+  setName: string;
+}
+
+export interface AgentHandoffReview extends PromptExportAgentHandoff {
+  freshness: 'current' | 'changed' | 'unknown';
+  pictureNumbers: readonly number[];
+  textCount: number;
+}
+
+export type AgentHandoffReviewResult =
+  { ok: true; value: AgentHandoffReview } | { ok: false; error: PromptBundleControllerError };
 
 export type PromptBundleSelection =
   number | Pick<PromptBundleActionRequest, 'bundleNumber' | 'planId' | 'artifactSessionId'>;
@@ -221,6 +252,8 @@ export interface PromptBundleControllerEngineOptions {
   rendering?: Partial<PromptBundleControllerRendering>;
   includeMasterOverview?: boolean;
   getIncludeRecognisedText?(): boolean;
+  /** Write each screenshot's recorded source info into the Markdown. Defaults to off. */
+  getIncludeSourceContext?(): boolean;
 }
 
 export class PromptBundleControllerEngine {
@@ -232,12 +265,14 @@ export class PromptBundleControllerEngine {
   private readonly getSavedContext: () => Promise<SavedPromptExportContext>;
   private readonly includeMasterOverview: boolean;
   private readonly getIncludeRecognisedText: () => boolean;
+  private readonly getIncludeSourceContext: () => boolean;
   private activeRun?: ActiveRun;
   private latestPlan?: PreparedPromptPlan;
   private latestArtifact?: PromptExportArtifact;
   private runSequence = 0;
   private previewSequence = 0;
   private previewAbort?: AbortController;
+  private previewFailure?: PromptBundleControllerError;
   private pendingCleanup?: ActiveRun;
   private disposed = false;
 
@@ -247,6 +282,7 @@ export class PromptBundleControllerEngine {
     this.rendering = { ...defaultRendering(), ...options.rendering };
     this.includeMasterOverview = options.includeMasterOverview ?? true;
     this.getIncludeRecognisedText = options.getIncludeRecognisedText ?? (() => true);
+    this.getIncludeSourceContext = options.getIncludeSourceContext ?? (() => false);
     this.pipeline = new PromptExportPipeline({
       bridge: this.bridge,
       rendering: this.rendering,
@@ -329,10 +365,44 @@ export class PromptBundleControllerEngine {
     });
   }
 
-  private resultError(error: unknown, run?: ActiveRun): PromptBundleControllerActionResult {
-    const detail = publicError(error);
+  private bundleRequest(selection: PromptBundleSelection | undefined): PromptBundleActionRequest | undefined {
+    const card =
+      typeof selection === 'number'
+        ? this.state.cards.find((item) => item.bundleNumber === selection)
+        : selection;
+    return (
+      card && {
+        planId: card.planId,
+        artifactSessionId: card.artifactSessionId,
+        bundleNumber: card.bundleNumber,
+      }
+    );
+  }
+
+  /** Called only while the terminating run still owns the current cards. */
+  private settledCards(error?: string): readonly PromptBundleCardModel[] {
+    return this.state.cards.map((card) =>
+      ['preparing', 'writing', 'copying'].includes(card.state)
+        ? {
+            ...card,
+            state: error ? 'error' : card.outcome && card.outcome !== 'opened' ? 'copied' : 'idle',
+            error,
+            outcome: error ? undefined : card.outcome,
+          }
+        : card,
+    );
+  }
+
+  private resultError(
+    error: unknown,
+    run?: ActiveRun,
+    selection?: PromptBundleSelection,
+  ): PromptBundleControllerActionResult {
+    const bundle = this.bundleRequest(selection);
+    const detail = bundle ? { ...publicError(error), bundle } : publicError(error);
     if (!run || this.activeRun === run) {
       this.emit({
+        cards: run ? this.settledCards(detail.message) : this.state.cards,
         error: detail,
         progress: {
           phase: detail.code === 'cancelled' ? 'cancelled' : 'error',
@@ -434,6 +504,7 @@ export class PromptBundleControllerEngine {
       signal: run.controller.signal,
       reuseCheck,
       includeRecognisedText: this.getIncludeRecognisedText(),
+      includeSourceContext: this.getIncludeSourceContext(),
       assertActive: () => this.assertActive(run),
       loadContentItem: (input) => this.loadContentItem(input),
       loadScreenshotContent: (input) => this.bridge.loadScreenshotContent(input),
@@ -530,7 +601,8 @@ export class PromptBundleControllerEngine {
         throw nativeFailure(result.error);
       }
       run.finalized = result.value;
-      if (run.plan) this.applyArtifact(run.plan, run.session, result.value, new Map());
+      if (run.plan && (this.activeRun === run || this.pendingCleanup === run))
+        this.applyArtifact(run.plan, run.session, result.value, new Map());
       if (this.pendingCleanup === run) {
         this.pendingCleanup = undefined;
         this.emit({ cleanupPending: false });
@@ -558,10 +630,30 @@ export class PromptBundleControllerEngine {
       projectId: prepared.context.snapshot.project.id,
       collectionId: prepared.context.collectionId,
       snapshotFingerprint: prepared.snapshotFingerprint,
+      collectionName: prepared.input.collectionName,
+      setName: session.setName,
+      handoffItems: new Map(
+        prepared.plan.bundles.map((bundle) => [
+          bundle.number,
+          { pictureNumbers: bundle.pictureNumbers, textCount: bundle.textItems.length },
+        ]),
+      ),
       grants: new Map(finalized.bundles.map((grant) => [grant.bundleNumber, grant])),
     };
     this.latestArtifact = artifact;
-    this.emit({ cards: cardsForPlan(prepared, encoded, artifact) });
+    const firstBundle = finalized.bundles[0].bundleNumber;
+    this.emit({
+      cards: cardsForPlan(prepared, encoded, artifact),
+      savedHandoff: {
+        selection: {
+          planId: artifact.planId,
+          artifactSessionId: artifact.sessionId,
+          bundleNumber: firstBundle,
+        },
+        collectionName: artifact.collectionName,
+        setName: artifact.setName,
+      },
+    });
   }
 
   private async createFreshExport(run: ActiveRun): Promise<{
@@ -647,9 +739,12 @@ export class PromptBundleControllerEngine {
       const finalized = finishResult.value;
       run.finalized = finalized;
       if (run.terminalKind !== 'finish' || finalized.status !== 'completed') {
-        this.applyArtifact(prepared, session, finalized, settled.encodedCharacters);
-        throw cancelledFailure();
+        if (this.activeRun === run)
+          this.applyArtifact(prepared, session, finalized, settled.encodedCharacters);
+        if (run.terminalKind === 'cancel' || run.controller.signal.aborted) throw cancelledFailure();
+        throw failure('export-incomplete', 'Prompt export did not complete.', true);
       }
+      this.assertActive(run);
       this.applyArtifact(prepared, session, finalized, settled.encodedCharacters);
       return { prepared, session, finalized };
     } finally {
@@ -676,6 +771,14 @@ export class PromptBundleControllerEngine {
       run = this.beginRun();
       let metadata = await this.prepareMetadata(run, undefined, hasReusablePlan);
       this.assertActive(run);
+      if (
+        artifact &&
+        ('kind' in metadata ||
+          artifact.projectPath !== metadata.context.snapshot.projectPath ||
+          artifact.projectId !== metadata.context.snapshot.project.id ||
+          artifact.collectionId !== metadata.context.collectionId)
+      )
+        this.emit({ savedHandoff: undefined });
       if (
         hasReusablePlan &&
         ('kind' in metadata ||
@@ -823,6 +926,8 @@ export class PromptBundleControllerEngine {
             'These files belong to an older export session. Use the latest prompt card.',
             true,
           ),
+          undefined,
+          selection,
         );
     }
     const card = this.state.cards.find((item) => item.bundleNumber === bundleNumber);
@@ -834,11 +939,15 @@ export class PromptBundleControllerEngine {
     if (!matchesCurrentCard)
       return this.resultError(
         failure('invalid-bundle', 'Review the current prompt cards before copying.', true),
+        undefined,
+        selection,
       );
     const selectedIdentity = this.selectedBundleIdentity(selection);
     if (typeof selection !== 'number' && !selectedIdentity)
       return this.resultError(
         failure('invalid-bundle', 'Review the current prompt cards before copying.', true),
+        undefined,
+        selection,
       );
     if (
       this.pendingCleanup ||
@@ -892,8 +1001,9 @@ export class PromptBundleControllerEngine {
       this.activeRun = undefined;
       return { ok: true, sessionId: artifact.sessionId, bundleNumber };
     } catch (error) {
-      if (bundleNumber !== undefined) this.setCardState(bundleNumber, 'error', publicError(error).message);
-      return this.resultError(error, run);
+      if (run && this.activeRun === run && bundleNumber !== undefined)
+        this.setCardState(bundleNumber, 'error', publicError(error).message);
+      return this.resultError(error, run, selection);
     }
   }
 
@@ -1056,7 +1166,7 @@ export class PromptBundleControllerEngine {
         });
         if (!copy.ok) {
           const detail = nativeFailure(copy.error, true).detail;
-          this.setCardState(bundle.number, 'error', detail.message);
+          if (this.activeRun === run) this.setCardState(bundle.number, 'error', detail.message);
           throw new ControllerFailure(detail);
         }
         this.assertActive(run);
@@ -1077,7 +1187,7 @@ export class PromptBundleControllerEngine {
           reportedError = cleanupError;
         }
       }
-      return this.resultError(reportedError, run);
+      return this.resultError(reportedError, run, requestedBundleNumber);
     }
   }
 
@@ -1153,7 +1263,12 @@ export class PromptBundleControllerEngine {
         progress: {
           phase: 'copying',
           bundleNumber,
-          message: outcome === 'opened' ? 'Opening generated files' : `Copying ${outcome}`,
+          message:
+            outcome === 'opened'
+              ? 'Opening generated files'
+              : outcome === 'terminal'
+                ? 'Copying for terminal'
+                : `Copying ${outcome}`,
         },
       });
       this.setCardState(bundleNumber, 'copying');
@@ -1180,9 +1295,83 @@ export class PromptBundleControllerEngine {
       return { ok: true, sessionId: artifact.sessionId, bundleNumber };
     } catch (error) {
       const number = selectionNumber(selection);
-      if (number !== undefined)
+      if (run && this.activeRun === run && number !== undefined)
         this.setCardState(number, 'error', publicError(error).message, outcome === 'opened');
-      return this.resultError(error, run);
+      return this.resultError(error, run, selection);
+    }
+  }
+
+  /** Requires an explicit saved grant. Inspecting a handoff never prepares or replaces exports. */
+  async inspectAgentHandoff(selection: PromptBundleActionRequest): Promise<AgentHandoffReviewResult> {
+    if (this.activeRun)
+      return {
+        ok: false,
+        error: failure('busy', 'Wait for the active prompt action to finish.', true).detail,
+      };
+    let run: ActiveRun | undefined;
+    try {
+      if (!selection.artifactSessionId || !this.bridge.getPromptExportAgentHandoff)
+        throw failure('invalid-bundle', 'Prepare files before handing this bundle to an agent.', true);
+      const { artifact, bundleNumber } = this.artifactSelection(selection);
+      run = this.beginRun();
+      this.emit({ error: undefined, progress: { phase: 'checking', message: 'Checking saved handoff' } });
+      const handoff = unwrap(
+        await this.bridge.getPromptExportAgentHandoff({ sessionId: artifact.sessionId, bundleNumber }),
+      );
+      this.assertActive(run);
+      let freshness: AgentHandoffReview['freshness'] = 'unknown';
+      try {
+        const metadata = await this.prepareMetadata(run, artifact, true);
+        freshness =
+          'kind' in metadata || metadata.snapshotFingerprint !== artifact.snapshotFingerprint
+            ? 'changed'
+            : 'current';
+      } catch (error) {
+        this.assertActive(run);
+        freshness = publicError(error).code === 'content-changed' ? 'changed' : 'unknown';
+      }
+      this.assertActive(run);
+      this.activeRun = undefined;
+      this.emit({ progress: undefined });
+      const summary = artifact.handoffItems.get(bundleNumber)!;
+      return {
+        ok: true,
+        value: { ...handoff, collectionName: artifact.collectionName, ...summary, freshness },
+      };
+    } catch (error) {
+      return this.resultError(error, run, selection) as { ok: false; error: PromptBundleControllerError };
+    }
+  }
+
+  /** Explicitly opens the selected saved files even when the collection has newer edits. */
+  async openSavedFiles(selection: PromptBundleActionRequest): Promise<PromptBundleControllerActionResult> {
+    if (this.activeRun)
+      return {
+        ok: false,
+        error: failure('busy', 'Wait for the active prompt action to finish.', true).detail,
+      };
+    let run: ActiveRun | undefined;
+    try {
+      if (!selection.artifactSessionId || !this.bridge.getPromptExportAgentHandoff)
+        throw failure('invalid-bundle', 'This saved handoff is unavailable. Prepare files again.', true);
+      const { artifact, bundleNumber } = this.artifactSelection(selection);
+      run = this.beginRun();
+      unwrap(await this.bridge.getPromptExportAgentHandoff({ sessionId: artifact.sessionId, bundleNumber }));
+      this.assertActive(run);
+      for (const target of [
+        ...(artifact.grants.get(bundleNumber)?.pngFilename ? ['png' as const] : []),
+        'markdown' as const,
+      ]) {
+        unwrap(
+          await this.bridge.openPromptExportBundle({ sessionId: artifact.sessionId, bundleNumber, target }),
+        );
+        this.assertActive(run);
+      }
+      this.activeRun = undefined;
+      this.emit({ progress: undefined });
+      return { ok: true, sessionId: artifact.sessionId, bundleNumber };
+    } catch (error) {
+      return this.resultError(error, run, selection);
     }
   }
 
@@ -1192,7 +1381,7 @@ export class PromptBundleControllerEngine {
       typeof selection === 'number'
         ? this.latestArtifact?.grants.has(selection)
         : Boolean(selection.artifactSessionId);
-    if (!hasGrant && this.bridge.copyText) {
+    if (!hasGrant && this.bridge.copyPromptExportMarkdown) {
       let run: ActiveRun | undefined;
       try {
         if (
@@ -1243,7 +1432,7 @@ export class PromptBundleControllerEngine {
             );
         }
         this.assertActive(run);
-        await this.bridge.copyText(bundle.markdown);
+        unwrap(await this.bridge.copyPromptExportMarkdown(bundle.markdown));
         this.assertActive(run);
         // Do not orphan a finalized artifact for the same content: replacing latestPlan
         // gives it a new random planId, which makes open()/copy treat it as stale.
@@ -1256,7 +1445,7 @@ export class PromptBundleControllerEngine {
         this.activeRun = undefined;
         return { ok: true, bundleNumber: bundle.number };
       } catch (error) {
-        return this.resultError(error, run);
+        return this.resultError(error, run, selection);
       }
     }
     return this.nativeArtifactAction(
@@ -1273,6 +1462,23 @@ export class PromptBundleControllerEngine {
       (sessionId, bundleNumber) =>
         this.bridge.copyPromptExportBundle({ sessionId, bundleNumber, target: 'image' }),
       'image',
+    );
+  }
+
+  /** Plain text for an agent CLI: a short summary plus the quoted Markdown and PNG paths. */
+  copyForTerminal(
+    selection: PromptBundleSelection,
+    wsl = false,
+  ): Promise<PromptBundleControllerActionResult> {
+    return this.nativeArtifactAction(
+      selection,
+      (sessionId, bundleNumber) =>
+        this.bridge.copyPromptExportBundle({
+          sessionId,
+          bundleNumber,
+          target: wsl ? 'terminal-wsl' : 'terminal',
+        }),
+      'terminal',
     );
   }
 
@@ -1335,6 +1541,7 @@ export class PromptBundleControllerEngine {
     const bundleNumber = selectionNumber(selection);
     if (bundleNumber === undefined)
       return this.resultError(failure('invalid-bundle', 'Choose a prompt to preview.', true));
+    const requestedBundle = this.bundleRequest(selection);
     const sequence = ++this.previewSequence;
     this.previewAbort?.abort();
     const controller = new AbortController();
@@ -1362,6 +1569,9 @@ export class PromptBundleControllerEngine {
         await this.validateArtifactContext(artifact, controller.signal);
         if (sequence !== this.previewSequence) throw cancelledFailure();
         this.emit({
+          ...(this.previewFailure && this.state.error === this.previewFailure
+            ? { error: undefined, progress: undefined }
+            : {}),
           preview: {
             bundleNumber,
             dataUrl:
@@ -1389,6 +1599,9 @@ export class PromptBundleControllerEngine {
         );
       if (sequence !== this.previewSequence) throw cancelledFailure();
       this.emit({
+        ...(this.previewFailure && this.state.error === this.previewFailure
+          ? { error: undefined, progress: undefined }
+          : {}),
         preview: {
           bundleNumber,
           dataUrl:
@@ -1404,7 +1617,9 @@ export class PromptBundleControllerEngine {
     } catch (error) {
       if (sequence !== this.previewSequence || controller.signal.aborted)
         return { ok: false, error: cancelledFailure().detail };
-      return this.resultError(error);
+      const result = this.resultError(error, undefined, requestedBundle);
+      if (!result.ok) this.previewFailure = result.error;
+      return result;
     } finally {
       if (sequence === this.previewSequence) this.previewAbort = undefined;
     }
@@ -1418,10 +1633,12 @@ export class PromptBundleControllerEngine {
       const result = await this.terminate(run, 'cancel');
       const finalized = unwrap(result);
       if (run.session) run.finalized = finalized;
-      if (run.session && run.plan) this.applyArtifact(run.plan, run.session, finalized, new Map());
       if (this.activeRun === run) {
+        if (run.session && run.plan) this.applyArtifact(run.plan, run.session, finalized, new Map());
+        const cards = this.settledCards();
         this.activeRun = undefined;
         this.emit({
+          cards,
           progress: {
             phase: finalized.status === 'completed' ? 'complete' : 'cancelled',
             message:

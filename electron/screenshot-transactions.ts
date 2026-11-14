@@ -230,7 +230,10 @@ function isStoredImage(value: unknown): value is StoredImage {
   );
 }
 
-function parseManifest(value: unknown, expectedToken: string): TransactionManifest {
+export function parseScreenshotTransactionManifest(
+  value: unknown,
+  expectedToken: string,
+): TransactionManifest {
   if (!value || typeof value !== 'object')
     throw new ScreenshotTransactionError('invalid-journal', 'Transaction manifest is not an object.');
   const input = value as Record<string, unknown>;
@@ -341,7 +344,7 @@ async function loadManifest(
       { cause: error },
     );
   }
-  return { directory, manifest: parseManifest(value, token) };
+  return { directory, manifest: parseScreenshotTransactionManifest(value, token) };
 }
 
 /**

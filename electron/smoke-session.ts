@@ -1,9 +1,11 @@
+import type { OwnedSmokeFaultController } from './smoke-fault-controller.js';
 import { app, type BrowserWindow } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { runSmokeWorkflow, type SmokeWorkflowHost } from './smoke-workflow.js';
 import {
   boundedSmokeDiagnostic,
+  SMOKE_RENDERER_DIAGNOSTIC,
   pathIsWithin,
   validateCreatedSmokeDirectory,
 } from './smoke-native-driver.js';
@@ -13,6 +15,7 @@ export interface SmokeSessionHost extends Omit<
   'approveNextBackupRestore' | 'approveNextProjectDeletion'
 > {
   mainWindow(): BrowserWindow | null;
+  prepareFaults?(fixture: string, temporary: string): Promise<OwnedSmokeFaultController>;
   captureCapability(): Promise<unknown>;
   /** Record a one-use approval; the session has already verified the fixture path. */
   approveBackupRestore(realPath: string): void;
@@ -36,11 +39,23 @@ export async function runSmokeSession(host: SmokeSessionHost): Promise<number> {
       throw new Error(`Smoke ${action} approval must name a real disposable fixture project.`);
     return real;
   };
+  const faults = process.env.IMNOTA_SMOKE_MODE === 'faults';
+  let faultController: OwnedSmokeFaultController | undefined;
   let exitCode = 0;
   let result: unknown;
   try {
     const requestedMode = process.env.IMNOTA_SMOKE_MODE;
-    const mode = requestedMode === 'stress' || requestedMode === 'clipboard' ? requestedMode : 'smoke';
+    const mode =
+      requestedMode === 'stress' ||
+      requestedMode === 'clipboard' ||
+      requestedMode === 'faults' ||
+      requestedMode === 'quick-capture'
+        ? requestedMode
+        : 'smoke';
+    if (faults) {
+      faultController = await host.prepareFaults?.(fixture, temporaryRoot);
+      if (!faultController) throw new Error('Missing fault ownership controller.');
+    }
     if (process.env.IMNOTA_SMOKE_CAPTURE_CAPABILITY === 'real-memory-only') {
       result = {
         passed: true,
@@ -60,8 +75,10 @@ export async function runSmokeSession(host: SmokeSessionHost): Promise<number> {
           trayAvailable: host.trayAvailable,
           globalCaptureShortcutRegistered: host.globalCaptureShortcutRegistered,
           readProject: host.readProject,
+          listCaptureWindows: host.listCaptureWindows,
           restoreRecovery: host.restoreRecovery,
           readSettings: host.readSettings,
+          quickCaptures: host.quickCaptures,
           async approveNextBackupRestore(projectPath) {
             host.approveBackupRestore(await fixtureProject(projectPath, 'restore'));
           },
@@ -75,6 +92,7 @@ export async function runSmokeSession(host: SmokeSessionHost): Promise<number> {
           version: app.getVersion(),
           expectedVersion: process.env.IMNOTA_EXPECT_VERSION,
           mode,
+          faultController,
         },
       );
     }
@@ -90,27 +108,46 @@ export async function runSmokeSession(host: SmokeSessionHost): Promise<number> {
           process.env.IMNOTA_SMOKE_ARTIFACT_DIR,
           'artifact',
         );
+      } catch (artifactError) {
+        console.error('Failure report unavailable:', artifactError);
+      }
+    }
+    let rendererState: unknown;
+    let windowFocused: boolean | undefined;
+    const diagnosticStarted = Date.now();
+    const failedWindow = host.mainWindow();
+    if (failedWindow && !failedWindow.isDestroyed()) {
+      windowFocused = failedWindow.isFocused();
+      rendererState = await boundedSmokeDiagnostic(() =>
+        failedWindow.webContents.executeJavaScript(SMOKE_RENDERER_DIAGNOSTIC),
+      );
+    }
+    const rendererResponsiveness = {
+      requestedAt: new Date(diagnosticStarted).toISOString(),
+      elapsedMs: Date.now() - diagnosticStarted,
+      status: rendererState === undefined ? 'unavailable' : 'responded',
+    };
+    result = {
+      passed: false,
+      version: app.getVersion(),
+      error: failureMessage,
+      rendererResponsiveness,
+      rendererState,
+      windowFocused,
+      diagnosticsHealth,
+    };
+    if (failureArtifactDirectory) {
+      try {
         await fs.writeFile(
           path.join(failureArtifactDirectory, 'verification-failure.json'),
-          JSON.stringify(
-            { passed: false, version: app.getVersion(), error: failureMessage, diagnosticsHealth },
-            null,
-            2,
-          ),
+          JSON.stringify(result, null, 2),
           { flag: 'wx' },
         );
       } catch (artifactError) {
         console.error('Failure report unavailable:', artifactError);
       }
     }
-    let rendererState: unknown;
-    const failedWindow = host.mainWindow();
     if (failedWindow && !failedWindow.isDestroyed()) {
-      rendererState = await boundedSmokeDiagnostic(() =>
-        failedWindow.webContents.executeJavaScript(
-          `({ text: document.body.innerText.slice(-12000), active: document.activeElement?.outerHTML.slice(0, 1000), pointerTrace: window.__imnotaPointerTrace, pointerGeometry: window.__imnotaPointerGeometry })`,
-        ),
-      );
       if (failureArtifactDirectory) {
         try {
           const captured = await boundedSmokeDiagnostic(() => failedWindow.webContents.capturePage());
@@ -123,21 +160,36 @@ export async function runSmokeSession(host: SmokeSessionHost): Promise<number> {
         }
       }
     }
-    result = {
-      passed: false,
-      version: app.getVersion(),
-      error: failureMessage,
-      rendererState,
-      diagnosticsHealth,
-    };
     console.error(error);
     console.error('Renderer state:', rendererState);
   }
+  faultController?.cancel();
   try {
+    if (faults && process.env.IMNOTA_SMOKE_ARTIFACT_DIR)
+      await fs.writeFile(
+        path.join(process.env.IMNOTA_SMOKE_ARTIFACT_DIR, 'fault-lifecycle.json'),
+        JSON.stringify(
+          {
+            retainedFixture: fixture,
+            profile: process.env.IMNOTA_SMOKE_USER_DATA,
+            pid: process.pid,
+            argv: process.argv,
+            cwd: process.cwd(),
+            exitCode,
+            disarmed: true,
+            events: faultController?.events ?? [],
+          },
+          null,
+          2,
+        ),
+        { flag: 'wx' },
+      );
     if (process.env.IMNOTA_SMOKE_RESULT)
       await fs.writeFile(process.env.IMNOTA_SMOKE_RESULT, JSON.stringify(result, null, 2), { flag: 'wx' });
   } finally {
-    await removeSmokeFixture(temporaryRoot, fixture);
+    faultController?.cancel();
+    if (!faults) await removeSmokeFixture(temporaryRoot, fixture);
+    else console.error('Retained synthetic fault fixture:', fixture);
   }
   return exitCode;
 }

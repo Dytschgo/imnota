@@ -1,5 +1,21 @@
-import { AlertTriangle, Check, ChevronDown, Copy, FileImage, FileText, FolderOpen } from 'lucide-react';
-import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  Copy,
+  FileImage,
+  FileText,
+  FolderOpen,
+  SquareTerminal,
+} from 'lucide-react';
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '../components/ui';
 import type { WindowsCopyVariantId } from '../../shared/workflow-bridge';
@@ -10,7 +26,8 @@ import './prompt-bundles.css';
 export type PromptBundleCardState =
   'idle' | 'preparing' | 'writing' | 'copying' | 'copied' | 'cancelled' | 'error';
 
-export type PromptDeliveryOutcome = 'combined' | 'markdown' | 'image' | 'paths' | 'files' | 'opened';
+export type PromptDeliveryOutcome =
+  'combined' | 'markdown' | 'image' | 'paths' | 'terminal' | 'files' | 'opened';
 
 /** What the last copy put on the clipboard, shown as "Last copied: …". */
 const outcomeLabels: Record<PromptDeliveryOutcome, string> = {
@@ -18,6 +35,7 @@ const outcomeLabels: Record<PromptDeliveryOutcome, string> = {
   markdown: 'Markdown',
   image: 'Image',
   paths: 'File paths',
+  terminal: 'Terminal hand-off',
   files: 'Files',
   opened: 'Files opened',
 };
@@ -53,8 +71,11 @@ export interface PromptBundleActionRequest {
 export interface PromptBundleCardProps {
   bundle: PromptBundleCardModel;
   disabled?: boolean;
+  /** Visual activity from dialog progress; does not change action availability. */
+  active?: boolean;
   /** The dialog already shows this failure, so the card does not repeat it. */
   errorReported?: boolean;
+  fallbackAvailable?: boolean;
   fileClipboardAvailable?: boolean;
   platform?: ShortcutPlatform;
   defaultCopyVariant?: WindowsCopyVariantId;
@@ -69,7 +90,43 @@ export interface PromptBundleCardProps {
   onCopyImage?(request: PromptBundleActionRequest): void | Promise<void>;
   onOpenFiles?(request: PromptBundleActionRequest): void | Promise<void>;
   onCopyPaths?(request: PromptBundleActionRequest): void | Promise<void>;
+  /** `wsl` translates Windows paths for a WSL shell; only offered on Windows. */
+  onCopyForTerminal?(request: PromptBundleActionRequest, wsl: boolean): void | Promise<void>;
   onLoadPreview?(request: PromptBundleActionRequest): void | Promise<void>;
+  onAgentHandoff?(request: PromptBundleActionRequest): void | Promise<void>;
+}
+
+const busyStates: readonly PromptBundleCardState[] = ['preparing', 'writing', 'copying'];
+/** Long enough for the success ring to finish one lap and fade. */
+export const COPY_CELEBRATION_MS = 2200;
+
+/** True only while a copy that just finished in this card is being acknowledged. */
+function useCopyCelebration({ state, outcome, opened, error, planId }: PromptBundleCardModel) {
+  const failed = Boolean(error);
+  const [celebrating, setCelebrating] = useState(false);
+  const previous = useRef({ state, outcome, planId });
+  useEffect(() => {
+    const wasBusy = busyStates.includes(previous.current.state);
+    const newOutcome = outcome !== previous.current.outcome || planId !== previous.current.planId;
+    previous.current = { state, outcome, planId };
+    setCelebrating(false);
+    // Open retains the last clipboard outcome; copy completion clears `opened`.
+    // Fallback copies finish idle; direct Markdown can also replace the plan
+    // without making this card busy. A new outcome on that plan is completion.
+    if (
+      (!wasBusy && !newOutcome) ||
+      !['idle', 'copied'].includes(state) ||
+      failed ||
+      opened ||
+      !outcome ||
+      outcome === 'opened'
+    )
+      return;
+    setCelebrating(true);
+    const timer = window.setTimeout(() => setCelebrating(false), COPY_CELEBRATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [failed, opened, outcome, planId, state]);
+  return celebrating && ['idle', 'copied'].includes(state) && !failed && !opened;
 }
 
 function requestFor(bundle: PromptBundleCardModel): PromptBundleActionRequest {
@@ -95,7 +152,9 @@ function pictureLabel(numbers: readonly number[]): string {
 export function PromptBundleCard({
   bundle,
   disabled = false,
+  active = false,
   errorReported = false,
+  fallbackAvailable = false,
   fileClipboardAvailable = false,
   platform = 'windows',
   defaultCopyVariant = 'files',
@@ -107,7 +166,9 @@ export function PromptBundleCard({
   onCopyImage,
   onOpenFiles,
   onCopyPaths,
+  onCopyForTerminal,
   onLoadPreview,
+  onAgentHandoff,
 }: PromptBundleCardProps) {
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ left: number; top: number }>();
@@ -115,8 +176,14 @@ export function PromptBundleCard({
   const menuRef = useRef<HTMLDivElement>(null);
   const restoreFocusAfterOption = useRef(false);
   const optionsMenuId = useId().replace(/:/g, '');
-  const busy = ['preparing', 'writing', 'copying'].includes(bundle.state);
+  const busy = busyStates.includes(bundle.state);
   const copied = bundle.state === 'copied' && !bundle.error;
+  const celebrating = useCopyCelebration(bundle);
+  const tone = bundle.error
+    ? 'error'
+    : bundle.warning || bundle.delivery === 'file-only'
+      ? 'warning'
+      : undefined;
   const savedLocally = Boolean(bundle.artifactSessionId || bundle.filenames?.length);
   const request = requestFor(bundle);
   const supportsFileVariants = fileClipboardAvailable && bundle.pictureNumbers.length > 0;
@@ -126,6 +193,14 @@ export function PromptBundleCard({
   const variantLabels = copyVariantLabels(platform);
   const dialog = optionsRef.current?.closest<HTMLElement>('[role="dialog"]');
   const menuPortal = dialog ?? (typeof document === 'undefined' ? undefined : document.body);
+
+  // Keep the row mounted to observe direct-copy outcomes across plan replacement,
+  // but discard the old plan's transient menu just as a remount used to do.
+  useLayoutEffect(() => {
+    if (menuRef.current?.contains(document.activeElement)) restoreFocusAfterOption.current = true;
+    setOptionsOpen(false);
+    setMenuPosition(undefined);
+  }, [bundle.planId]);
 
   useLayoutEffect(() => {
     if (!optionsOpen) return;
@@ -243,7 +318,8 @@ export function PromptBundleCard({
     }
   };
 
-  const showFallbacks = bundle.delivery === 'file-only' || Boolean(bundle.warning || bundle.error);
+  const showFallbacks =
+    fallbackAvailable || bundle.delivery === 'file-only' || Boolean(bundle.warning || bundle.error);
   // Labels stay in the DOM for assistive tech and the native smoke; only the values are shown.
   const facts: Array<[label: string, value: string]> = [
     ['Content', bundle.pictureNumbers.length ? pictureLabel(bundle.pictureNumbers) : 'Text only'],
@@ -257,6 +333,10 @@ export function PromptBundleCard({
     <article
       data-testid="prompt-bundle-card"
       data-bundle-number={bundle.bundleNumber}
+      data-state={bundle.state}
+      data-active={active || undefined}
+      data-tone={tone}
+      data-celebrate={celebrating || undefined}
       className="prompt-bundle-card"
       aria-labelledby={`prompt-bundle-${bundle.bundleNumber}`}
       aria-busy={busy}
@@ -275,16 +355,6 @@ export function PromptBundleCard({
         ) : (
           <FileText size={22} aria-hidden="true" />
         )}
-        {bundle.pictureNumbers.length > 0 && (
-          <span className="prompt-bundle-preview-caption" aria-hidden="true">
-            First picture
-            <br />
-            Preview bundle
-          </span>
-        )}
-        <span className="prompt-bundle-index" aria-hidden="true">
-          {String(bundle.bundleNumber).padStart(2, '0')}
-        </span>
       </button>
       <div className="prompt-bundle-body">
         <div className="prompt-bundle-heading">
@@ -338,6 +408,16 @@ export function PromptBundleCard({
           <p className="prompt-bundle-error" role="alert">
             {bundle.error}
           </p>
+        )}
+        {savedLocally && onAgentHandoff && (
+          <Button
+            variant="ghost"
+            data-testid={`agent-handoff-${bundle.bundleNumber}`}
+            disabled={busy || disabled || !bundle.artifactSessionId}
+            onClick={() => void onAgentHandoff(request)}
+          >
+            Send saved bundle to agent
+          </Button>
         )}
         {showFallbacks && (
           <div
@@ -478,6 +558,24 @@ export function PromptBundleCard({
                 >
                   <Copy size={14} aria-hidden="true" /> Copy file paths
                 </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!onCopyForTerminal}
+                  onClick={() => runOption((target) => onCopyForTerminal?.(target, false))}
+                >
+                  <SquareTerminal size={14} aria-hidden="true" /> Copy for terminal
+                </button>
+                {platform === 'windows' && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!onCopyForTerminal}
+                    onClick={() => runOption((target) => onCopyForTerminal?.(target, true))}
+                  >
+                    <SquareTerminal size={14} aria-hidden="true" /> Copy for terminal (WSL paths)
+                  </button>
+                )}
                 <button
                   type="button"
                   role="menuitem"

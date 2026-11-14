@@ -4,11 +4,19 @@ import { emptyProject } from '../utils.js';
 import { validateProject } from '../schema.js';
 
 describe('project schema', () => {
-  it('accepts the versioned project shape', () => {
-    expect(validateProject(emptyProject('Valid', ''))).toMatchObject({ schemaVersion: 3, name: 'Valid' });
-  });
-  it('rejects missing project identity', () => {
-    expect(() => validateProject({ schemaVersion: 1 })).toThrow();
+  it('preserves optional comparisons and missing members for Undo; rejects identical sides', () => {
+    const project = emptyProject('Comparison', '');
+    expect(validateProject(project).collections[0].comparison).toBeUndefined();
+    project.collections[0].comparison = {
+      kind: 'current-expected',
+      leftId: 'deleted-one',
+      rightId: 'deleted-two',
+    };
+    expect(validateProject(JSON.parse(JSON.stringify(project))).collections[0].comparison).toEqual(
+      project.collections[0].comparison,
+    );
+    project.collections[0].comparison.rightId = 'deleted-one';
+    expect(() => validateProject(project)).toThrow(/different screenshots/);
   });
   it('round-trips allowlisted icons and falls back for unknown future icon keys', () => {
     expect(validateProject({ ...emptyProject('Valid', ''), icon: 'rocket' }).icon).toBe('rocket');

@@ -6,6 +6,7 @@ export function captureTrayTemplate(input: {
   onCapture(mode: CaptureOverlayMode): void;
   onOpen(): void;
   onQuit(): void;
+  onPendingCaptures?(): void;
 }): MenuItemConstructorOptions[] {
   return [
     { label: 'Capture region', click: () => input.onCapture('region') },
@@ -16,6 +17,7 @@ export function captureTrayTemplate(input: {
     },
     { label: 'Capture display', click: () => input.onCapture('display') },
     { type: 'separator' },
+    ...(input.onPendingCaptures ? [{ label: 'Pending captures', click: input.onPendingCaptures }] : []),
     { label: 'Open Imnota', click: () => input.onOpen() },
     { label: 'Quit Imnota', click: () => input.onQuit() },
   ];
