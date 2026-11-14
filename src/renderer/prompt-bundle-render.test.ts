@@ -111,6 +111,20 @@ function resolver(events: string[] = []) {
 }
 
 describe('prompt bundle composition', () => {
+  it('draws the comparison role in the PNG label without changing picture numbering', async () => {
+    const input = bundle();
+    input.pictures[0].comparisonRole = 'Expected';
+    input.pictures[1].comparisonRole = 'Current';
+    const env = environment();
+    await composePromptBundle(input, {
+      environment: env.renderEnvironment,
+      resolvePicturePng: resolver().resolve,
+    });
+    expect(env.fillText.mock.calls.map((call) => call[0])).toEqual([
+      'Expected · Picture 1 — Screen 1',
+      'Current · Picture 2 — Screen 2',
+    ]);
+  });
   it('draws native-size PNGs in order and releases each before decoding the next', async () => {
     const testEnvironment = environment();
     const pictureResolver = resolver(testEnvironment.events);

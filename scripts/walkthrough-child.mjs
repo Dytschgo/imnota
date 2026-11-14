@@ -28,9 +28,21 @@ export function runWalkthroughChild(
     const finish = () => {
       if (!exited || stopping) return;
       cleanup();
-      if (cancelled) reject(new Error(`Native verification cancelled by ${cancelled}.`));
+      if (cancelled)
+        reject(
+          Object.assign(new Error(`Native verification cancelled by ${cancelled}.`), {
+            nativeChildOutcome: { ...exited, cancelled },
+          }),
+        );
       else if (timedOut)
-        reject(new Error(`Native verification exceeded its ${Math.round(timeoutMs / 1000)} second limit.`));
+        reject(
+          Object.assign(
+            new Error(`Native verification exceeded its ${Math.round(timeoutMs / 1000)} second limit.`),
+            {
+              nativeChildOutcome: { ...exited, timedOut: true },
+            },
+          ),
+        );
       else resolve(exited);
     };
     const killGroup = (signal) => {
@@ -97,7 +109,7 @@ export function runWalkthroughChild(
       reject(error);
     });
     child.once('exit', (code, signal) => {
-      exited = { code, signal };
+      exited = { code, signal, pid: child.pid };
       finish();
     });
   });

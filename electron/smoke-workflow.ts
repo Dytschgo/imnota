@@ -1,7 +1,7 @@
 import { app, nativeImage, type BrowserWindow } from 'electron';
 import { nativeClipboard, platformClipboardHtml } from './native-clipboard.js';
 import { readWindowsClipboardFilesForSmoke } from './smoke-clipboard.js';
-import { exerciseOleClipboardSmoke } from './ole-clipboard-smoke.js';
+import { exerciseDotNetBitmapClipboardSmoke, exerciseOleClipboardSmoke } from './ole-clipboard-smoke.js';
 import { exerciseChromiumClipboardSmoke } from './chromium-clipboard-smoke.js';
 import { waitForStableCanvasSample } from './stable-canvas.js';
 import { withRestoredCanvasSmokeState } from './canvas-basics-smoke-state.js';
@@ -15,14 +15,21 @@ import { exerciseMixedContent } from './mixed-content-smoke.js';
 import { exerciseUiFeedback } from './ui-feedback-smoke.js';
 import { readMacClipboardFiles, readMacClipboardObservation } from './mac-clipboard.js';
 import { onboardingCopyEvidence } from './smoke-onboarding-copy.js';
-import { setGlassSurfaces } from './smoke-appearance.js';
+import { assertLightTextContrast, setGlassSurfaces } from './smoke-appearance.js';
 import { shouldShowOnboarding, type PreferenceSettingsResult } from '../src/shared/preferences.js';
 import { findWhatsNewRelease } from '../src/shared/whats-new.js';
 import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
 import { planHostedShares, hostedShareSummary } from './hosted-share-plan.js';
 import { exerciseRegionCapture } from './capture-smoke.js';
+import { exerciseQuickCaptures } from './quick-capture-smoke.js';
+import { smokeStringLiteral } from './smoke-string-literal.js';
+import type { QuickCaptureWindow } from './quick-capture-window.js';
+import type { CaptureDisplay } from '../src/shared/capture.js';
+import { exerciseSourceContext } from './source-context-smoke.js';
 import { exerciseNextFeatures, captureNextFeatureLightViews } from './next-features-smoke.js';
 import { exerciseLocalHistory } from './backup-smoke.js';
+import { exerciseAgentHandoff } from './agent-handoff-smoke.js';
+import { exerciseScreenshotComparison } from './screenshot-comparison-smoke.js';
 import type { PersistenceDiagnostics } from './persistence-diagnostics.js';
 import type { WindowsCopyVariantId } from '../src/shared/workflow-bridge.js';
 import {
@@ -39,9 +46,10 @@ import {
   type SmokePoint,
 } from './smoke-native-driver.js';
 
-export type SmokeWorkflowMode = 'smoke' | 'stress' | 'clipboard';
+export type SmokeWorkflowMode = 'smoke' | 'stress' | 'clipboard' | 'faults' | 'quick-capture';
 
 export interface SmokeWorkflowHost {
+  quickCaptures(): QuickCaptureWindow;
   diagnosticsHealth(): ReturnType<PersistenceDiagnostics['health']>;
   /** Update the in-memory production workspace without opening a native chooser. */
   setWorkspace(workspacePath: string): void | Promise<void>;
@@ -53,6 +61,9 @@ export interface SmokeWorkflowHost {
   globalCaptureShortcutRegistered(): boolean;
   /** Read through the production migration, validation, and description hydration path. */
   readProject(projectPath: string): Promise<ProjectData>;
+  listCaptureWindows(
+    displays: readonly CaptureDisplay[],
+  ): Promise<import('./capture-windows.js').CaptureWindowCandidate[]>;
   /** Run the production recovery path with "Restore edits" selected for this test fixture. */
   restoreRecovery(projectPath: string): Promise<ProjectSnapshot>;
   /** Read the persisted legacy update/workspace settings through production code. */
@@ -69,6 +80,7 @@ export interface SmokeWorkflowOptions {
   version: string;
   expectedVersion?: string;
   mode?: SmokeWorkflowMode;
+  faultController?: import('./smoke-fault-controller.js').OwnedSmokeFaultController;
 }
 
 export interface SmokeMemoryReading {
@@ -104,6 +116,7 @@ export interface SmokeWorkflowReport {
   assertions: string[];
   diagnosticsHealth: ReturnType<PersistenceDiagnostics['health']>;
   capture?: Awaited<ReturnType<typeof exerciseRegionCapture>>;
+  faults?: Awaited<ReturnType<typeof import('./native-fault-smoke.js').exerciseNativeFaultCases>>;
 }
 
 interface FixtureSource {
@@ -1272,6 +1285,12 @@ async function verifyOneImagePromptBundle(
     );
   if (path.basename(pngFiles[0], '.png') !== path.basename(bundleMarkdownFiles[0], '.md'))
     throw new Error('One-image prompt PNG and Markdown filenames do not match.');
+  const markdown = await fs.readFile(path.join(setDirectory, bundleMarkdownFiles[0]), 'utf8');
+  if (
+    !markdown.split(/\r?\n/).includes('- 2 redacted regions') ||
+    /\b(?:blur|pixelate)\b|`(?:redaction|pixels)`/.test(markdown)
+  )
+    throw new Error('Redacted bundle must report only the mask count, without mask kinds or ids.');
   const exportedPath = path.join(setDirectory, pngFiles[0]);
   if (!pathIsWithin(projectPath, exportedPath)) throw new Error('PNG export escaped its fixture project.');
   const exported = nativeImage.createFromPath(exportedPath);
@@ -1463,6 +1482,7 @@ async function captureWorkspaceMatrix(
     await driver.resize(viewport);
     await driver.click({ selector: '.settings-navigation button', text: 'Features', exact: true });
     await driver.waitFor({ selector: '#capture-title' });
+    await assertSettingsCardSpacing(driver);
     await driver.evaluate(`(() => {
       const detail = document.querySelector('[data-testid="capture-shortcut-summary"]');
       const heading = document.querySelector('#capture-title');
@@ -1481,6 +1501,7 @@ async function captureWorkspaceMatrix(
     );
     await driver.click({ selector: '.settings-navigation button', text: 'Workspace', exact: true });
     await driver.waitFor({ selector: '#workspace-settings-title' });
+    await assertSettingsCardSpacing(driver);
     await driver.evaluate(`(() => {
       const field = document.querySelector('#workspace-settings-title')?.parentElement?.querySelector('.workspace-path');
       if (!field) throw new Error('Workspace path field is missing.');
@@ -1499,8 +1520,36 @@ async function captureWorkspaceMatrix(
         'none',
       ),
     );
+    await driver.click({ selector: '.settings-navigation button', text: 'Updates & about', exact: true });
+    await driver.waitFor({ selector: '.whats-new-settings' });
+    await assertSettingsCardSpacing(driver);
+    await driver.evaluate(`document.querySelector('.whats-new-settings').scrollIntoView({ block: 'start' })`);
+    artifacts.push(
+      await driver.capture(
+        artifactDirectory,
+        `${viewport.width}x${viewport.height}-settings-updates.png`,
+        'none',
+      ),
+    );
   }
   await driver.click({ selector: '.settings-navigation button', text: 'Appearance', exact: true });
+}
+
+async function assertSettingsCardSpacing(driver: NativeUiDriver): Promise<void> {
+  await driver.evaluate(`(() => {
+    const grid = document.querySelector('.settings-view > .settings-grid');
+    const group = grid.querySelector(':scope > div:not([hidden])');
+    const cards = [...group.children].filter(child => child.getBoundingClientRect().height > 0);
+    if (cards.length < 2) throw new Error('Settings spacing fixture needs adjacent cards.');
+    for (let index = 1; index < cards.length; index++) {
+      if (cards[index].getBoundingClientRect().top <= cards[index - 1].getBoundingClientRect().bottom)
+        throw new Error('Adjacent settings cards touch or overlap.');
+    }
+    if (grid.scrollWidth > grid.clientWidth)
+      throw new Error('Settings cards overflow horizontally.');
+    if ([...grid.querySelectorAll(':scope > [hidden]')].some(group => group.getBoundingClientRect().height > 0))
+      throw new Error('An inactive settings category is visible.');
+  })()`);
 }
 
 async function assertMacSettingsTitlebarClearance(driver: NativeUiDriver): Promise<void> {
@@ -1552,6 +1601,10 @@ async function exercisePreferencesAndChannel(
     await clickAny(driver, SMOKE_UI_CONTRACT.settings);
   await driver.waitFor({ selector: '.settings-view, [data-testid="settings-view"]' });
   await assertMacSettingsTitlebarClearance(driver);
+  await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="light"])' });
+  await driver.waitFor({ selector: ':root[data-theme="light"]' });
+  await driver.waitFor({ selector: 'input[name="appearance-mode"][value="light"]:checked:not(:disabled)' });
+  await assertLightTextContrast(driver, artifactDirectory);
   for (const preset of BACKDROP_PRESETS) {
     await driver.click({ selector: `[data-testid="backdrop-preset-${preset}"]` });
     await driver.evaluate(`new Promise((resolve, reject) => {
@@ -1768,6 +1821,80 @@ async function exercisePreferencesAndChannel(
     }
   })()`);
   if (!workspaceRejected) throw new Error('Settings IPC accepted an untrusted workspace replacement.');
+  // Replay a discovery result through the real preload subscription. Smoke keeps
+  // discovery offline; this verifies presentation and native interaction only.
+  const previousStatus = await driver.evaluate(`window.imnota.getUpdateStatus()`);
+  try {
+    if (process.platform === 'darwin') {
+      // Presentation evidence only: native helper signaling and archive transactions
+      // have separate controls. Never install an update into this smoke session.
+      for (const { state, filename } of [
+        { state: 'available', filename: 'feedback-macos-update-available.png' },
+        { state: 'downloading', filename: 'feedback-macos-update-downloading.png' },
+        { state: 'downloaded', filename: 'feedback-macos-update-downloaded.png' },
+      ] as const) {
+        driver.browserWindow.webContents.send('update:status', {
+          state,
+          channel: 'nightly',
+          sourceChannel: 'nightly',
+          version: '0.4.1-nightly.20261002.37064937780',
+          percent: 42,
+        });
+        if (state === 'downloading')
+          await driver.waitFor({ selector: '[role="progressbar"][aria-valuenow="42"]' });
+        else
+          await driver.waitFor({
+            selector: '.update-settings button',
+            text: state === 'available' ? 'Download update' : 'Restart to install',
+            exact: true,
+          });
+        if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, filename, 'none'));
+      }
+    }
+    driver.browserWindow.webContents.send('update:status', {
+      state: 'not-available',
+      channel: 'nightly',
+      sourceChannel: 'stable',
+      version: '0.3.9',
+      manualDownload: true,
+      message:
+        'Installed version is newer than stable 0.3.9. Automatic downgrades are disabled. Nightly remains selected for future checks.',
+      releaseUrl: 'https://github.com/Dytschgo/imnota/releases/tag/v0.3.9',
+    });
+    await driver.waitFor({ selector: '.update-status', text: 'Automatic downgrades are disabled.' });
+    await driver.waitFor({
+      selector: '.update-settings button',
+      text: 'Open selected channel download',
+      exact: true,
+    });
+    await driver.click({ selector: '.settings-exit' });
+    const refresh = { selector: 'button[aria-label="No newer update. Check again."]' };
+    await driver.waitFor(refresh);
+    await driver.evaluate(`document.querySelector('[data-testid="update-indicator"] button').focus()`);
+    await driver.waitFor({
+      selector: '.floating-update-popover > strong',
+      text: 'No newer update · nightly',
+    });
+    await driver.press('Down');
+    await driver.waitFor({ selector: '.floating-update-popover:focus' });
+    const refreshOnly = await driver.evaluate<boolean>(`(() => {
+      const indicator = document.querySelector('[data-testid="update-indicator"]');
+      return !indicator.querySelector('.lucide-download') &&
+        document.activeElement?.matches('.floating-update-popover') &&
+        !!document.querySelector('.floating-update-popover a');
+    })()`);
+    if (!refreshOnly)
+      throw new Error('Older stable release was presented as a pending update or lost keyboard access.');
+    if (artifactDirectory)
+      artifacts.push(await driver.capture(artifactDirectory, 'feedback-no-newer-update.png', screenshot));
+    await driver.press('Escape');
+    await driver.waitFor({ selector: '.floating-update-popover' }, { absent: true });
+    await driver.click(refresh);
+    await driver.waitFor({ selector: '.floating-update-idle' });
+  } finally {
+    driver.browserWindow.webContents.send('update:status', previousStatus);
+  }
+  await clickAny(driver, SMOKE_UI_CONTRACT.settings);
 }
 
 async function promptCards(driver: NativeUiDriver): Promise<PromptCardState[]> {
@@ -2508,6 +2635,17 @@ async function exercisePromptWorkflow(
   if (rejectedClipboard.text !== text || !rejectedClipboard.png.equals(clipboardPng))
     throw new Error('Rejected prompt copy changed the native clipboard.');
   if (process.platform === 'win32' && options.verifyWindowsCopyVariants) {
+    const dotNetBitmap = await exerciseDotNetBitmapClipboardSmoke(
+      driver.browserWindow.getNativeWindowHandle(),
+      await promptBundlePaths(latestSet, copiedIndex),
+      (stage) => console.info(`Windows .NET bitmap clipboard smoke: ${stage}.`),
+    );
+    if (options.artifactDirectory)
+      await fs.writeFile(
+        path.join(options.artifactDirectory, 'windows-dotnet-bitmap-clipboard.json'),
+        JSON.stringify(dotNetBitmap, null, 2),
+        { flag: 'wx' },
+      );
     await exerciseOleClipboardSmoke(
       driver.browserWindow.getNativeWindowHandle(),
       await promptBundlePaths(latestSet, copiedIndex),
@@ -2799,6 +2937,27 @@ export async function runSmokeWorkflow(
   const timings: SmokeTiming[] = [];
   const checkpoint = await createSmokeCheckpoint(artifactDirectory);
   await checkpoint('starting isolated native workflow');
+  if (mode === 'faults') {
+    if (!options.faultController || !artifactDirectory)
+      throw new Error('Fault verification requires owned operands.');
+    const { exerciseNativeFaultCases } = await import('./native-fault-smoke.js');
+    const driver = new NativeUiDriver(activeWindow, 15_000);
+    if (!activeWindow.isVisible()) activeWindow.show();
+    activeWindow.focus();
+    const faults = await exerciseNativeFaultCases(driver, host, options.faultController);
+    const report: SmokeWorkflowReport = {
+      passed: true,
+      version: options.version,
+      mode,
+      artifacts: faults.artifacts,
+      timings: [],
+      assertions: faults.cases.map((value) => value.caseId),
+      faults,
+      diagnosticsHealth: host.diagnosticsHealth(),
+    };
+    await writeReportArtifact(artifactDirectory, report);
+    return report;
+  }
   const sources = await createFixtureSources(fixtureRoot);
   const driver = new NativeUiDriver(activeWindow, mode === 'stress' ? 30_000 : 15_000);
   if (!activeWindow.isVisible()) activeWindow.show();
@@ -2813,6 +2972,33 @@ export async function runSmokeWorkflow(
   if (!updateState.currentVersion || updateState.state !== 'idle')
     throw new Error('Updater/channel bridge did not remain offline and idle during smoke.');
   assertions.push('updater bridge and offline smoke state');
+
+  if (mode === 'quick-capture') {
+    // Focus the existing isolated runner on the new native window and its real
+    // capture/clipboard/filesystem paths. The full walkthrough remains a gate.
+    await driver.evaluate(
+      `(async()=>{const result=await window.imnota.setPreferenceSettings({onboarding:{completed:true},updates:{whatsNewAcknowledgedVersion:${smokeStringLiteral(options.version)}}});if(!result.ok)throw new Error(result.error.message);})()`,
+    );
+    driver.setWindow(await host.reopenWindow());
+    await driver.waitFor({ selector: '.library' });
+    const projectPath = await createProjectThroughUi(driver, 'Quick Capture Verification', false);
+    await importImages(driver, projectPath, sources, 3);
+    artifacts.push(...(await exerciseQuickCaptures(host, artifactDirectory)));
+    assertions.push(
+      'persistent quick capture ownership, native copy/drag, compact annotation, exact Add and independent Discard',
+    );
+    const report: SmokeWorkflowReport = {
+      passed: true,
+      version: options.version,
+      mode,
+      artifacts,
+      timings,
+      assertions,
+      diagnosticsHealth: host.diagnosticsHealth(),
+    };
+    await writeReportArtifact(artifactDirectory, report);
+    return report;
+  }
 
   if (mode === 'clipboard') {
     // Focused check of the real export and paste path from the workspace toolbar.
@@ -3093,8 +3279,14 @@ export async function runSmokeWorkflow(
     assertions.push('deterministic workspace annotations after native pointer checks');
   }
   await captureWorkspaceMatrix(driver, host, projectPath, artifactDirectory, artifacts);
+  artifacts.push(...(await exerciseScreenshotComparison(driver, host, projectPath, artifactDirectory)));
+  assertions.push(
+    'native screenshot comparison selection, both role modes, saved reopen, narrow layout and relationship-only removal',
+  );
   await exercisePreferencesAndChannel(driver, host, projectPath, artifactDirectory, artifacts);
-  assertions.push('preferences, performance profile, update channel confirmation and persistence');
+  assertions.push(
+    'preferences, performance profile, update channel confirmation and persistence; native solid light text contrast',
+  );
   await exerciseSharingPreferences(driver, host, artifactDirectory, artifacts);
   assertions.push('Sharing sender name persists across reopen and the owner-link control remains available');
   activeWindow = await host.reopenWindow();
@@ -3121,6 +3313,18 @@ export async function runSmokeWorkflow(
   });
   assertions.push(
     'first prompt copy publishes complete PNG/Markdown grants; repeat and Windows variants reuse the set with exact clipboard content',
+  );
+  artifacts.push(
+    ...(await exerciseAgentHandoff(
+      driver,
+      host,
+      projectPath,
+      promptTiming.latestSet.directory,
+      artifactDirectory,
+    )),
+  );
+  assertions.push(
+    'native exact saved agent instruction, off-by-default setup guidance, local MCP Markdown/PNG equality and changed-content handoff retention',
   );
   await closePromptDialog(driver);
 
@@ -3173,7 +3377,7 @@ export async function runSmokeWorkflow(
     }
   }
   assertions.push(
-    'DPR 2 one-image prompt dimensions, crop privacy, opaque redaction, translucent fill/stroke and pixelation pixels, and one PNG/Markdown pair',
+    'DPR 2 one-image prompt dimensions, crop privacy, opaque redaction, translucent fill/stroke and pixelation pixels, one PNG/Markdown pair, and count-only redaction Markdown',
   );
   await driver.click({ text: 'Share online', exact: true });
   await driver.waitFor({ text: 'KiB / 1,024 KiB text allowance' });
@@ -3400,10 +3604,17 @@ export async function runSmokeWorkflow(
   await checkpoint('existing image, clipboard, recovery and benchmark checks complete');
   artifacts.push(...(await exerciseMixedContent(driver, host, artifactDirectory)));
   assertions.push(
+    'text and drawing inspector Duplicate is reachable by native Tab and Enter persists each copy',
+  );
+  assertions.push(
     'mixed text/drawing UI, Markdown preview, autosave before navigation, editable scene and white PNG, duplicate/trash/Undo and reopen',
     'Recently deleted restores screenshot, drawing and text through the dialog after Undo toast expiry; success focus and saved/reopened bytes agree',
   );
   artifacts.push(...(await exerciseUiFeedback(driver, host, artifactDirectory)));
+  assertions.push('no-match scope action preserves the query and input focus; canvas hint fits at 110% zoom');
+  assertions.push(
+    'MCP copy failure is announced, retry succeeds, and incomplete guide has an uncompleted state',
+  );
   assertions.push(
     'full Markdown and annotation search targets, project icon/edit CAS, archive scope isolation and restore',
   );
@@ -3418,7 +3629,7 @@ export async function runSmokeWorkflow(
   );
   artifacts.push(...(await exerciseNextFeatures(driver, host, artifactDirectory, checkpoint)));
   assertions.push(
-    'template creation, editable Markdown and reopen, independent clipboard fallbacks, generated paths and read-only focused search',
+    'template creation, editable Markdown and reopen, independent clipboard fallbacks, generated paths, terminal handoff native plain-text paste and read-only focused search',
   );
   await checkpoint('templates, clipboard fallbacks and library search complete; starting local history');
   artifacts.push(...(await exerciseLocalHistory(driver, host, artifactDirectory, checkpoint)));
@@ -3426,6 +3637,8 @@ export async function runSmokeWorkflow(
   await checkpoint('local history restore and reopen complete; capturing light feature views');
   artifacts.push(...(await captureNextFeatureLightViews(driver, artifactDirectory)));
 
+  artifacts.push(...(await exerciseSourceContext(driver, host, fixtureRoot, artifactDirectory)));
+  assertions.push('source opt-in import, inspector edit/reopen/remove and export suppression while off');
   const captureSmoke = await exerciseRegionCapture(driver, host, artifactDirectory);
   if (!captureSmoke.skipped) {
     artifacts.push(...captureSmoke.artifacts);
@@ -3438,6 +3651,10 @@ export async function runSmokeWorkflow(
     );
   }
 
+  artifacts.push(...(await exerciseQuickCaptures(host, artifactDirectory)));
+  assertions.push(
+    'persistent quick capture ownership, native copy, compact annotation, exact Add and independent Discard',
+  );
   await checkpoint('all native workflow checks complete');
   const report: SmokeWorkflowReport = {
     passed: true,

@@ -141,6 +141,7 @@ export function SideNav({
   };
 
   const moveShortcutFocus = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.defaultPrevented) return;
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
     const buttons = Array.from(
       // Row pin buttons stay in Tab order; arrow keys move between destinations.

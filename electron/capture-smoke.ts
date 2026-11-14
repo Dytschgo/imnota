@@ -10,6 +10,8 @@ import {
   type CrossDisplaySmokeSelection,
 } from './capture-smoke-contract.js';
 import { screenshotPath } from './collections.js';
+import type { CaptureWindowCandidate } from './capture-windows.js';
+import { withSourceWindowFixture } from './source-window-fixture.js';
 import { NativeUiDriver, type SmokeCapture } from './smoke-native-driver.js';
 import {
   createWindowsSmokePointer,
@@ -23,12 +25,20 @@ export interface CaptureSmokeHost {
   trayAvailable(): boolean;
   globalCaptureShortcutRegistered(): boolean;
   readProject(projectPath: string): Promise<ProjectData>;
+  listCaptureWindows(displays: readonly CaptureDisplay[]): Promise<CaptureWindowCandidate[]>;
 }
 
 export interface CaptureSmokeResult {
   artifacts: SmokeCapture[];
   skipped: boolean;
   displays: CaptureDisplay[];
+  windowSource?: {
+    title: string;
+    app: string;
+    capturedAt: string;
+    screenshotId: string;
+    pixels: 'owned-window-or-synthetic-fallback';
+  };
   crossDisplay: null | {
     input: 'native-pointer' | 'overlay-ipc';
     selection: CaptureRectangle;
@@ -129,7 +139,7 @@ async function screenshotFiles(projectPath: string): Promise<string[]> {
   return files.sort();
 }
 
-async function openScreenshotProject(driver: NativeUiDriver): Promise<string> {
+export async function openScreenshotProject(driver: NativeUiDriver): Promise<string> {
   const target = await driver.evaluate<{
     projectPath: string;
     name: string;
@@ -244,7 +254,7 @@ async function chooseAddMenuItem(driver: NativeUiDriver, id: string): Promise<vo
   await driver.click({ selector: `[data-testid="add-item-${id}"]:not([aria-disabled="true"])` });
 }
 
-async function startCapture(
+export async function startCapture(
   driver: NativeUiDriver,
   trigger: 'menu' | 'global-shortcut' = 'menu',
 ): Promise<NativeUiDriver> {
@@ -568,8 +578,8 @@ async function waitForScreenshotCount(
 
 /**
  * Native-only region-capture exercise. It refuses to run unless main injects its
- * synthetic display source, so screenshots produced by this helper cannot contain
- * a real desktop image.
+ * synthetic display source. The owned Window fixture may use its native window
+ * pixels; no unrelated desktop image is retained.
  */
 export async function exerciseRegionCapture(
   initialDriver: NativeUiDriver,
@@ -729,6 +739,10 @@ export async function exerciseRegionCapture(
   )
     throw new Error('Cancelled capture changed the project screenshot records.');
 
+  await driver.evaluate(`(async () => {
+    const result=await window.imnota.setPreferenceSettings({promptExport:{includeSourceContext:true}});
+    if(!result.ok) throw new Error(result.error.message);
+  })()`);
   overlay = await startCapture(driver);
   await selectRegion(overlay);
   if (artifactDirectory)
@@ -744,6 +758,13 @@ export async function exerciseRegionCapture(
     (screenshot) => !baseline.screenshots.some((previous) => previous.id === screenshot.id),
   );
   if (!captured) throw new Error('Saved capture did not create a screenshot record.');
+  if (
+    captured.source?.via !== 'capture' ||
+    Number.isNaN(Date.parse(captured.source.capturedAt)) ||
+    captured.source.windowTitle ||
+    captured.source.url
+  )
+    throw new Error('Region capture source metadata is missing or invents a window/URL.');
   await driver.waitFor({ selector: `[data-testid="screenshot-${captured.id}"]` });
   const selected = await driver.evaluate<boolean>(
     `document.querySelector(${JSON.stringify(`[data-testid="screenshot-${captured.id}"]`)})?.closest('.shot-item')?.classList.contains('active') === true`,
@@ -829,14 +850,61 @@ export async function exerciseRegionCapture(
   // same source pixels and crop through the normal renderer/native IPC path.
   await driver.press('6', [process.platform === 'darwin' ? 'meta' : 'control', 'shift']);
   const afterRepeat = await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 4);
-  const repeated = afterRepeat.screenshots.at(-1);
+  // Physical metadata-array order is not screenshot display order. Identify the
+  // one newly inserted item, just as the display-capture check above does.
+  const repeatedItems = afterRepeat.screenshots.filter(
+    (shot) => !afterDisplay.screenshots.some((previous) => previous.id === shot.id),
+  );
+  const repeated = repeatedItems.length === 1 ? repeatedItems[0] : undefined;
+  if (artifactDirectory)
+    await fs.writeFile(
+      path.join(artifactDirectory, 'capture-repeat-observation.json'),
+      JSON.stringify(
+        {
+          expected: { id: captured.id, width: captured.originalWidth, height: captured.originalHeight },
+          addedIds: repeatedItems.map((shot) => shot.id),
+          beforeRepeat: afterDisplay.screenshots.map((shot) => ({
+            id: shot.id,
+            width: shot.originalWidth,
+            height: shot.originalHeight,
+          })),
+          afterRepeat: afterRepeat.screenshots.map((shot) => ({
+            id: shot.id,
+            width: shot.originalWidth,
+            height: shot.originalHeight,
+          })),
+        },
+        null,
+        2,
+      ),
+    );
   if (
     !repeated ||
     repeated.id === captured.id ||
     repeated.originalWidth !== captured.originalWidth ||
     repeated.originalHeight !== captured.originalHeight
   )
-    throw new Error('Repeat capture did not preserve the original crop dimensions.');
+    throw new Error(
+      'Repeat capture did not preserve the original crop dimensions. ' +
+        JSON.stringify({
+          expected: { id: captured.id, width: captured.originalWidth, height: captured.originalHeight },
+          chosen: repeated && {
+            id: repeated.id,
+            width: repeated.originalWidth,
+            height: repeated.originalHeight,
+          },
+          beforeRepeat: afterDisplay.screenshots.map((shot) => ({
+            id: shot.id,
+            width: shot.originalWidth,
+            height: shot.originalHeight,
+          })),
+          afterRepeat: afterRepeat.screenshots.map((shot) => ({
+            id: shot.id,
+            width: shot.originalWidth,
+            height: shot.originalHeight,
+          })),
+        }),
+    );
   const [originalBytes, repeatedBytes] = await Promise.all([
     fs.readFile(screenshotPath(projectPath, captured)),
     fs.readFile(screenshotPath(projectPath, repeated)),
@@ -915,5 +983,65 @@ export async function exerciseRegionCapture(
   await waitForClosed(trayOverlay, 'Queued tray capture overlay');
   await waitForAllCaptureOverlaysClosed(reopenedFromTray, 'Queued tray capture');
 
-  return { artifacts, skipped: false, displays, crossDisplay };
+  const windowSource = await withSourceWindowFixture(async (title) => {
+    const driver = new NativeUiDriver(reopenedFromTray);
+    let candidate: CaptureWindowCandidate | undefined;
+    const deadline = Date.now() + 15000;
+    do {
+      candidate = (await host.listCaptureWindows(screen.getAllDisplays())).find(
+        (window) => window.title === title,
+      );
+      if (candidate) break;
+      await delay(50);
+    } while (Date.now() < deadline);
+    if (!candidate) throw new Error('The OS did not identify the owned native source fixture.');
+    if (process.platform === 'darwin' && (!candidate.app || candidate.app === 'Notepad'))
+      throw new Error('WindowServer did not report the native fixture owner app.');
+    const before = await host.readProject(projectPath);
+    await waitForPaint(driver);
+    await startCapture(driver);
+    const fixtureDisplay = screen.getDisplayMatching(candidate.bounds).id;
+    const fixtureOverlay = captureOverlayWindows(driver.browserWindow).find(
+      (window) => screen.getDisplayMatching(window.getBounds()).id === fixtureDisplay,
+    );
+    if (!fixtureOverlay) throw new Error('The native fixture display has no capture overlay.');
+    const windowOverlay = new NativeUiDriver(fixtureOverlay);
+    await windowOverlay.click({ selector: '[data-mode="window"]' });
+    const display = screen.getDisplayMatching(windowOverlay.browserWindow.getBounds());
+    await windowOverlay.clickPoint({
+      x: Math.round(candidate.bounds.x + candidate.bounds.width / 2 - display.bounds.x),
+      y: Math.round(candidate.bounds.y + candidate.bounds.height / 2 - display.bounds.y),
+    });
+    await windowOverlay.waitFor({ selector: '.capture-instruction', text: title, exact: true });
+    await windowOverlay.click({ selector: '[data-action="save"]' });
+    await waitForClosed(windowOverlay.browserWindow, 'Window source capture');
+    const after = await waitForScreenshotCount(host, projectPath, before.screenshots.length + 1);
+    const saved = after.screenshots.find((shot) => !before.screenshots.some((old) => old.id === shot.id));
+    const expectedApp = process.platform === 'win32' ? 'Notepad' : candidate.app;
+    if (
+      !saved?.source ||
+      saved.source.via !== 'capture' ||
+      saved.source.windowTitle !== title ||
+      !expectedApp ||
+      saved.source.app !== expectedApp ||
+      saved.source.url ||
+      Number.isNaN(Date.parse(saved.source.capturedAt))
+    )
+      throw new Error('Native Window selection did not persist its actual OS title/app source.');
+    await driver.waitFor({ selector: `[data-testid="screenshot-${saved.id}"]` });
+    if (artifactDirectory)
+      artifacts.push(await driver.capture(artifactDirectory, 'source-context-native-window.png', saved));
+    return {
+      title,
+      app: expectedApp,
+      capturedAt: saved.source.capturedAt,
+      screenshotId: saved.id,
+      pixels: 'owned-window-or-synthetic-fallback' as const,
+    };
+  });
+  await new NativeUiDriver(reopenedFromTray).evaluate(`(async () => {
+    const result=await window.imnota.setPreferenceSettings({promptExport:{includeSourceContext:false}});
+    if(!result.ok) throw new Error(result.error.message);
+  })()`);
+  return { artifacts, skipped: false, displays, crossDisplay, windowSource };
 }

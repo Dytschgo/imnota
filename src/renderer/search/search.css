@@ -92,6 +92,39 @@
   color: var(--danger);
 }
 
+.project-search-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.project-search-other-scope {
+  min-block-size: 28px;
+  padding-inline: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--ink);
+  font: inherit;
+  font-size: 11px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .project-search-other-scope:hover {
+    border-color: var(--line-strong);
+  }
+}
+
+.project-search-other-scope:active {
+  background: var(--surface-2);
+}
+
+.project-search-other-scope:focus-visible {
+  outline: 2px solid var(--imnota-accent-hover);
+  outline-offset: 2px;
+}
+
 .project-search-results {
   min-height: 0;
   flex: 1;

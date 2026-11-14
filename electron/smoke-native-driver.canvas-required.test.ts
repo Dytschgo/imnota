@@ -16,16 +16,23 @@ afterEach(async () => {
   for (const directory of temporary.splice(0)) await fs.rm(directory, { recursive: true, force: true });
 });
 
-it.each(['selected-screenshot', 'onboarding', 'crop-applied'] as const)(
+it.each(['selected-screenshot', 'onboarding', 'crop-applied', 'quick-capture'] as const)(
   'waits through an initial canvas gap and rejects loading frames: %s',
   async (scenario) => {
     const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-driver-test-')));
     temporary.push(directory);
-    const expected = { id: 'fixture', originalWidth: 1920, originalHeight: 1080 };
+    const expected = {
+      id: 'fixture',
+      originalWidth: 1920,
+      originalHeight: 1080,
+      ...(scenario === 'quick-capture' ? { surface: 'quick-capture' as const } : {}),
+    };
     document.body.innerHTML =
       scenario === 'onboarding'
         ? ''
-        : `
+        : scenario === 'quick-capture'
+          ? '<main data-quick-capture-editor="fixture"></main>'
+          : `
       <div class="shot-item active"><button data-testid="screenshot-fixture"></button></div>`;
     const mount = (loading: boolean, dimensions = '1920 × 1080') => {
       document.querySelector('[data-testid="annotation-canvas"]')?.remove();
@@ -66,7 +73,11 @@ it.each(['selected-screenshot', 'onboarding', 'crop-applied'] as const)(
     await driver.waitForScreenshotCanvas(scenario === 'onboarding' ? undefined : expected);
     document.querySelector('[data-testid="annotation-canvas"]')!.remove();
     const dimensions = scenario === 'crop-applied' ? '1094 × 616' : '1920 × 1080';
-    const result = driver.capture(directory, `${scenario}.png`, 'annotation-canvas');
+    const result = driver.capture(
+      directory,
+      `${scenario}.png`,
+      scenario === 'quick-capture' ? expected : 'annotation-canvas',
+    );
     void result.catch(() => undefined);
     await vi.advanceTimersByTimeAsync(0);
     expect(capturePage).not.toHaveBeenCalled();
@@ -80,6 +91,14 @@ it.each(['selected-screenshot', 'onboarding', 'crop-applied'] as const)(
       await vi.advanceTimersByTimeAsync(0);
       expect(capturePage).not.toHaveBeenCalled();
       selected.setAttribute('data-testid', 'screenshot-fixture');
+    }
+    if (scenario === 'quick-capture') {
+      const editor = document.querySelector('[data-quick-capture-editor]')!;
+      editor.setAttribute('data-quick-capture-editor', 'different-capture');
+      mount(false, dimensions);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(capturePage).not.toHaveBeenCalled();
+      editor.setAttribute('data-quick-capture-editor', 'fixture');
     }
     mount(false, dimensions);
     await vi.advanceTimersByTimeAsync(0);

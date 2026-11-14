@@ -17,6 +17,8 @@ import type {
   ProjectSearchTarget,
 } from '../../shared/project-search';
 import { Modal } from '../components/ui';
+import { textBlockLabel } from '../collection/text-block-label';
+import { reasonMessage } from '../user-facing-error';
 import './search.css';
 
 export interface SearchDialogProps {
@@ -65,6 +67,7 @@ export function SearchDialog({
   const [activeIndex, setActiveIndex] = useState(0);
   const requestSequence = useRef(0);
   const openGeneration = useRef(0);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => setCurrentScope(scope), [scope]);
   useEffect(() => {
@@ -108,7 +111,7 @@ export function SearchDialog({
         .catch((reason: unknown) => {
           if (requestSequence.current !== sequence) return;
           setResponse(null);
-          setError(reason instanceof Error ? reason.message : 'Search is unavailable. Try again.');
+          setError(reasonMessage(reason, 'Search is unavailable. Try again.'));
         })
         .finally(() => {
           if (requestSequence.current === sequence) setLoading(false);
@@ -123,6 +126,13 @@ export function SearchDialog({
   if (!open) return null;
   const results = response?.results ?? [];
 
+  const selectScope = (value: ProjectSearchScope) => {
+    setCurrentScope(value);
+    onScopeChange?.(value);
+    // The no-match action unmounts once the new search starts; keep typing and arrows working.
+    inputRef.current?.focus();
+  };
+
   const openResult = async (result: ProjectSearchResult) => {
     if (opening) return;
     const generation = openGeneration.current;
@@ -133,7 +143,7 @@ export function SearchDialog({
       if (openGeneration.current === generation) onClose();
     } catch (reason) {
       if (openGeneration.current !== generation) return;
-      setError(reason instanceof Error ? reason.message : 'This result could not be opened.');
+      setError(reasonMessage(reason, 'This result could not be opened.'));
       setOpening(false);
     }
   };
@@ -170,6 +180,7 @@ export function SearchDialog({
             <Search size={17} aria-hidden="true" />
             <span className="sr-only">Search workspace</span>
             <input
+              ref={inputRef}
               data-autofocus
               data-testid="global-search-input"
               value={query}
@@ -192,10 +203,7 @@ export function SearchDialog({
                 type="button"
                 className={currentScope === value ? 'active' : ''}
                 aria-pressed={currentScope === value}
-                onClick={() => {
-                  setCurrentScope(value);
-                  onScopeChange?.(value);
-                }}
+                onClick={() => selectScope(value)}
               >
                 {value === 'active' ? (
                   <Layers3 size={13} aria-hidden="true" />
@@ -218,10 +226,21 @@ export function SearchDialog({
           ) : loading && !response ? (
             <p>Searching local projects…</p>
           ) : response && results.length === 0 ? (
-            <p>
-              No matches in {currentScope === 'active' ? 'active projects' : 'the archive'}.
-              {response.warnings?.length ? ' Some local content could not be searched.' : ''}
-            </p>
+            <div className="project-search-empty">
+              <p>
+                No matches in {currentScope === 'active' ? 'active projects' : 'the archive'}.
+                {response.warnings?.length ? ' Some local content could not be searched.' : ''}
+              </p>
+              {/* The same words may be in the other location; one step instead of a hidden toggle. */}
+              <button
+                type="button"
+                className="project-search-other-scope"
+                data-testid="global-search-other-scope"
+                onClick={() => selectScope(currentScope === 'active' ? 'archived' : 'active')}
+              >
+                {currentScope === 'active' ? 'Search the archive' : 'Search active projects'}
+              </button>
+            </div>
           ) : response?.truncated ? (
             <p>
               Showing {results.length} matches within search limits. Some content or results may not be shown.
@@ -256,7 +275,7 @@ export function SearchDialog({
               <span className="project-search-result-icon">{kindIcons[result.kind]}</span>
               <span className="project-search-result-copy">
                 <span className="project-search-result-heading">
-                  <strong>{result.title}</strong>
+                  <strong>{result.kind === 'text' ? textBlockLabel(result.title) : result.title}</strong>
                   <span>{kindLabels[result.kind]}</span>
                 </span>
                 {result.excerpt && <span className="project-search-excerpt">{result.excerpt}</span>}
