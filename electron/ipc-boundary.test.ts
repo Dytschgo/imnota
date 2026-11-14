@@ -16,6 +16,7 @@ import { IpcRouter } from './ipc-router.js';
 import type { CaptureWorkflowRegistrar, IpcHost } from './main.js';
 import { assertProjectPath } from './project-path.js';
 import { NativeWorkflowError, workflowOutcome } from './workflow-errors.js';
+import { createMcpTools } from './mcp-server.js';
 
 /**
  * The renderer bridge (`preload.cts`), the argument contracts (`ipc-contracts.ts`) and the
@@ -249,6 +250,42 @@ async function registerHandlerModules(
 }
 
 const failure = (result: unknown) => result as Extract<WorkflowResult<unknown>, { ok: false }>;
+
+describe('direct prompt Markdown clipboard workflow', () => {
+  it('returns a structured too-large failure without reaching the clipboard writer', async () => {
+    const outcome = await entry('workflow:prompt-export:copy-markdown').invoke(
+      trusted,
+      'x'.repeat(2_000_001),
+    );
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: {
+        code: 'clipboard-limit',
+        details: { reason: 'too-large' },
+      },
+    });
+    expect(reached).toEqual([]);
+  });
+
+  it('preserves a rejected clipboard failure in the workflow outcome', async () => {
+    const copyTextToClipboard = vi.fn(async () => {
+      throw new NativeWorkflowError('clipboard-limit', 'Private Markdown must not be displayed', false, {
+        reason: 'rejected',
+      });
+    });
+    const local = tripwireHost({ copyTextToClipboard });
+    const { registry: handlers } = await registerHandlerModules(local.host);
+    const outcome = await handlers.get('workflow:prompt-export:copy-markdown')!.invoke(trusted, 'Markdown');
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: {
+        code: 'clipboard-limit',
+        details: { reason: 'rejected' },
+      },
+    });
+    expect(copyTextToClipboard).toHaveBeenCalledWith('Markdown');
+  });
+});
 const isResultKind = (kind: Kind) => kind === 'workflow' || kind === 'capture';
 
 let root: string;
@@ -301,6 +338,60 @@ beforeEach(() => {
   for (const registration of registry.values()) registration.listener.mockClear();
 });
 
+it('keeps update admission open and never starts installation while pending captures need a decision', async () => {
+  const install = vi.fn(async () => undefined);
+  const show = vi.fn(async () => undefined);
+  const local = tripwireHost({
+    updateInstallPending: false,
+    quickCaptureAccess: { store: { size: 2 }, show },
+    updateController: { install },
+  });
+  const { registry: handlers } = await registerHandlerModules(local.host);
+  await expect(handlers.get('update:install')!.invoke(trusted)).rejects.toThrow(
+    /Add or discard pending captures/,
+  );
+  expect(show).toHaveBeenCalledWith(true);
+  expect(install).not.toHaveBeenCalled();
+  expect(local.reached).not.toContain('set updateInstallPending');
+});
+
+it('hands off only the selected non-first part of a multi-part export through actual MCP', async () => {
+  const projectPath = path.join(workspace, 'handoff-project');
+  const document = emptyProject('Handoff project', '');
+  const collectionId = document.collections[0].id;
+  const setName = 'Review - 260913-120000';
+  const folder = path.join(projectPath, 'collections', collectionId, 'exports', setName);
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(path.join(projectPath, 'project.json'), JSON.stringify(document));
+  await fs.writeFile(path.join(folder, `${setName} - 01.md`), '# First unrelated part');
+  await fs.writeFile(path.join(folder, `${setName} - 02.md`), '# Second selected part');
+  const local = tripwireHost({
+    promptBundleWorkflow: {
+      describeSaved: async () => ({ projectPath, collectionId, collectionName: 'Handoff', setName }),
+    },
+    assertProjectPath: async () => projectPath,
+    workspaceOrThrow: () => workspace,
+    preferenceSettingsResult: { settings: { agentAccess: { enabled: true } } },
+  });
+  const { registry: handlers } = await registerHandlerModules(local.host);
+  const result = (await handlers
+    .get('workflow:prompt-export:agent-handoff')!
+    .invoke(trusted, { sessionId, bundleNumber: 2 })) as WorkflowResult<{ instruction: string }>;
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error('Expected handoff instruction.');
+  const match = result.value.instruction.match(/get_bundle\((\{[^\n]+\})\)/);
+  expect(match).not.toBeNull();
+  const args = JSON.parse(match![1]) as { id: string; bundleNumbers?: number[] };
+  expect(args.bundleNumbers).toEqual([2]);
+  const tool = createMcpTools({
+    enabled: () => true,
+    workspacePath: () => workspace,
+    appVersion: () => 'test',
+  }).find((tool) => tool.name === 'get_bundle')!;
+  const saved = (await tool.handle(args)) as { bundles: Array<{ markdown: string }> };
+  expect(saved.bundles.map((bundle) => bundle.markdown)).toEqual(['# Second selected part']);
+});
+
 describe('renderer bridge, contracts and handlers stay consistent', () => {
   let invoked: string[];
   let listened: string[];
@@ -318,11 +409,30 @@ describe('renderer bridge, contracts and handlers stay consistent', () => {
         if (name !== 'electron') throw new Error(`Unexpected preload dependency: ${name}`);
         return electron.module;
       },
-      process: { platform: 'win32' },
+      process: { platform: 'win32', argv: [] },
     });
     const bridge = electron.exposed.imnota as Record<string, unknown>;
     for (const member of Object.values(bridge))
       if (typeof member === 'function') await (member as (...args: unknown[]) => unknown)(() => undefined);
+    expect(electron.exposed.imnotaNativeFault).toBeUndefined();
+    expect(electron.listened).not.toContain('smoke:fault-command');
+    // Exercise the separate closed receiver as well; retain complete channel enumeration.
+    const nonce = '11111111-1111-4111-8111-111111111111';
+    new vm.Script(compiled.outputText, { filename: 'preload.cjs' }).runInNewContext({
+      exports: {},
+      require: (name: string) => {
+        if (name !== 'electron') throw new Error(`Unexpected preload dependency: ${name}`);
+        return electron.module;
+      },
+      process: { platform: 'win32', argv: [`--imnota-native-fault=${nonce}`] },
+    });
+    const receiver = electron.exposed.imnotaNativeFault as {
+      nonce: string;
+      onCommand(callback: () => void): void;
+    };
+    expect(Object.keys(receiver).sort()).toEqual(['nonce', 'onCommand', 'report']);
+    expect(receiver.nonce).toBe(nonce);
+    receiver.onCommand(() => undefined);
     invoked = sorted(electron.invoked);
     listened = sorted(electron.listened);
     preloadSource = await readSource('preload.cts');
@@ -362,7 +472,14 @@ describe('renderer bridge, contracts and handlers stay consistent', () => {
       if (!file.endsWith('.ts') || file.endsWith('.test.ts')) continue;
       sent.push(...literals(await readSource(file), /webContents\.send\(\s*'([^']+)'/g));
     }
-    expect(sorted(sent.filter((channel) => !channel.startsWith('capture-overlay:')))).toEqual(listened);
+    // Separate capture renderers have dedicated preload/handler contract tests.
+    expect(
+      sorted(
+        sent.filter(
+          (channel) => !channel.startsWith('capture-overlay:') && !channel.startsWith('quick-capture:'),
+        ),
+      ),
+    ).toEqual(listened);
   });
 
   it('keeps the capture overlay preload and its main-process listeners in step', async () => {
@@ -552,6 +669,8 @@ const projectPathCalls: Record<string, (projectPath: string) => unknown[]> = {
 
 /** Channels that mention a project path but whose authorization this file cannot observe. */
 const authorizedElsewhere: Record<string, string> = {
+  'workflow:prompt-export:agent-handoff':
+    'Finalized prompt grant authorizes its project; current workspace is rechecked before deriving the exact MCP id',
   'projects:open-dialog': 'authorizes the folder chosen in a native dialog, not a renderer argument',
   'projects:update-metadata': 'main.ts mutateProjectMetadata authorizes the path',
   'projects:set-archived': 'main.ts mutateProjectMetadata authorizes the path',
@@ -740,6 +859,11 @@ const invalidCases: Record<string, InvalidCase[]> = {
       'projects:update-metadata',
       'a patch of fields the renderer may not set',
       [{ projectPath: anyPath, expectedRevision: revision, patch: { id: 'project_other' } }],
+    ],
+    [
+      'projects:update-metadata',
+      'a non-boolean favourite',
+      [{ projectPath: anyPath, expectedRevision: revision, patch: { favourite: 'yes' } }],
     ],
     [
       'projects:set-archived',
@@ -953,7 +1077,19 @@ const invalidCases: Record<string, InvalidCase[]> = {
     ['workflow:prompt-export:finish', 'an unknown field', [{ sessionId, target: anyPath }]],
     ['workflow:prompt-export:cancel', 'a session id with separators', [{ sessionId: 'a/b' }]],
     ['workflow:prompt-export:read', 'a fractional bundle number', [{ sessionId, bundleNumber: 1.5 }]],
+    [
+      'workflow:prompt-export:agent-handoff',
+      'a renderer-supplied path',
+      [{ sessionId, bundleNumber: 1, projectPath: '../outside' }],
+    ],
+    [
+      'workflow:prompt-export:agent-handoff',
+      'an invalid session',
+      [{ sessionId: '../outside', bundleNumber: 1 }],
+    ],
     ['workflow:prompt-export:copy', 'an unknown target', [{ sessionId, bundleNumber: 1, target: 'shell' }]],
+    ['workflow:prompt-export:copy-markdown', 'non-text Markdown', [{ markdown: 'a' }]],
+    ['workflow:prompt-export:copy-markdown', 'an extra argument', ['a', 'b']],
     [
       'workflow:prompt-export:open',
       'an unknown target',

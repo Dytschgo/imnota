@@ -2,7 +2,33 @@ import { it } from 'node:test';
 import { Buffer } from 'node:buffer';
 import { URL } from 'node:url';
 import assert from 'node:assert/strict';
-import { runMcpProcess } from './verify-mcp.mjs';
+import { inspectMcpClientNode, runMcpProcess } from './verify-mcp.mjs';
+
+it('uses the configured client Node only at version 24 or later', () => {
+  const probe = () => ({ status: 0, stdout: 'v24.13.0\n' });
+  assert.deepEqual(inspectMcpClientNode('C:/node24/node.exe', probe), {
+    executable: 'C:/node24/node.exe',
+    version: 'v24.13.0',
+  });
+  assert.throws(
+    () => inspectMcpClientNode('C:/node22/node.exe', () => ({ status: 0, stdout: 'v22.23.3\n' })),
+    /must be version 24 or later.*v22\.23\.3/,
+  );
+  assert.throws(
+    () => inspectMcpClientNode('C:/missing/node.exe', () => ({ error: new Error('ENOENT') })),
+    /binary is unavailable.*ENOENT/,
+  );
+  const previous = process.env.IMNOTA_MCP_CLIENT_NODE;
+  try {
+    process.env.IMNOTA_MCP_CLIENT_NODE = 'C:/node24/node.exe';
+    assert.equal(inspectMcpClientNode(undefined, probe).executable, 'C:/node24/node.exe');
+    delete process.env.IMNOTA_MCP_CLIENT_NODE;
+    assert.equal(inspectMcpClientNode(undefined, probe).executable, process.execPath);
+  } finally {
+    if (previous === undefined) delete process.env.IMNOTA_MCP_CLIENT_NODE;
+    else process.env.IMNOTA_MCP_CLIENT_NODE = previous;
+  }
+});
 
 // Node fixtures test only the launcher failure contract. They are never packaged acceptance evidence.
 const run = (source, exercise = async () => {}, options) =>

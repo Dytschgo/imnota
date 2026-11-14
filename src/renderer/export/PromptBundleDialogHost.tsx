@@ -5,19 +5,25 @@ import type { PromptBundleActionRequest, PromptBundleCardModel } from './PromptB
 import { PromptSharingDialog } from './PromptSharingDialog';
 import { HostedShareDialog } from './HostedShareDialog';
 import { useState } from 'react';
-import type { HostedShareArtifacts } from './prompt-export-controller-core';
+import type { HostedShareArtifacts, PromptBundleRetryResult } from './prompt-export-controller-core';
 import type { PromptBundleControllerError } from './prompt-export-controller-core';
 import type { WindowsCopyVariantId } from '../../shared/workflow-bridge';
 import type { ShortcutPlatform } from '../../shared/shortcuts';
+import { AgentHandoffDialog } from './AgentHandoffDialog';
+import type {
+  AgentHandoffReview,
+  AgentHandoffReviewResult,
+  SavedHandoffReceipt,
+} from './prompt-export-controller-core';
 
-interface PromptActionError {
-  message: string;
-  technicalDetails?: string;
-}
+type PromptActionError = PromptBundleControllerError;
 
 type PromptActionResult = { ok: true } | { ok: false; error: PromptActionError };
 
 export interface PromptBundleUiController {
+  savedHandoff?: SavedHandoffReceipt;
+  inspectAgentHandoff?(selection: PromptBundleActionRequest): Promise<AgentHandoffReviewResult>;
+  openSavedFiles?(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
   cards: readonly PromptBundleCardModel[];
   progress?: PromptBundleProgress;
   error?: PromptActionError;
@@ -36,10 +42,13 @@ export interface PromptBundleUiController {
   copyImage(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
   openFiles(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
   copyPaths(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
+  copyForTerminal(selection: PromptBundleActionRequest, wsl?: boolean): Promise<PromptActionResult>;
   openFolder(): Promise<PromptActionResult>;
   cancel(): Promise<PromptActionResult>;
   loadPreview(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
   clearPreview(): void;
+  retry(): Promise<PromptBundleRetryResult>;
+  canRetry: boolean;
   retryCleanup(): Promise<PromptActionResult>;
   prepareHostedShare(): Promise<
     { ok: true; value: HostedShareArtifacts } | { ok: false; error: PromptBundleControllerError }
@@ -62,8 +71,16 @@ export function PromptBundleDialogHost({
   onDefaultCopyVariantChange?(variant: WindowsCopyVariantId): Promise<void>;
 }) {
   const [hostedArtifacts, setHostedArtifacts] = useState<HostedShareArtifacts>();
+  const [agentReview, setAgentReview] = useState<{
+    handoff: AgentHandoffReview;
+    selection: PromptBundleActionRequest;
+  }>();
+  const inspectHandoff = async (selection: PromptBundleActionRequest) => {
+    const result = await controller.inspectAgentHandoff?.(selection);
+    if (result?.ok) setAgentReview({ handoff: result.value, selection });
+  };
   const [preferenceError, setPreferenceError] = useState<string>();
-  // Bundle failures are shown once, inside the dialog, with a Rebuild action.
+  // Bundle failures are shown once, inside the dialog, with the appropriate recovery action.
   const run = async (action: Promise<PromptActionResult>) => {
     await action;
   };
@@ -71,7 +88,12 @@ export function PromptBundleDialogHost({
   return (
     <>
       <PromptSharingDialog
-        hidden={Boolean(controller.preview || hostedArtifacts)}
+        hidden={Boolean(controller.preview || hostedArtifacts || agentReview)}
+        savedHandoffLabel={controller.savedHandoff?.collectionName}
+        onSavedAgentHandoff={
+          controller.savedHandoff ? () => inspectHandoff(controller.savedHandoff!.selection) : undefined
+        }
+        onAgentHandoff={controller.inspectAgentHandoff ? inspectHandoff : undefined}
         bundles={controller.cards}
         fileClipboardAvailable={fileClipboardAvailable}
         platform={platform}
@@ -105,16 +127,33 @@ export function PromptBundleDialogHost({
         onCopyImage={(selection) => run(controller.copyImage(selection))}
         onOpenFiles={(selection) => run(controller.openFiles(selection))}
         onCopyPaths={(selection) => run(controller.copyPaths(selection))}
+        onCopyForTerminal={(selection, wsl) => run(controller.copyForTerminal(selection, wsl))}
         onOpenExportFolder={() => run(controller.openFolder())}
         onCancel={() => run(controller.cancel())}
+        onRebuild={() => run(controller.prepareFreshFiles())}
+        onRetry={
+          controller.canRetry
+            ? async () => {
+                const result = await controller.retry();
+                if (result.ok && 'value' in result) setHostedArtifacts(result.value);
+              }
+            : undefined
+        }
         onRetryCleanup={() => run(controller.retryCleanup())}
         onShareHosted={async () => {
           const result = await controller.prepareHostedShare();
           if (result.ok) setHostedArtifacts(result.value);
-          else onError(result.error.message);
+          // The controller reports preparation failures in the sharing dialog.
         }}
         onLoadPreview={(selection) => run(controller.loadPreview(selection))}
       />
+      {agentReview && (
+        <AgentHandoffDialog
+          handoff={agentReview.handoff}
+          onClose={() => setAgentReview(undefined)}
+          onOpenSavedFiles={() => controller.openSavedFiles!(agentReview.selection)}
+        />
+      )}
       {hostedArtifacts && (
         <HostedShareDialog
           artifacts={hostedArtifacts}

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { setTimeout, clearTimeout } from 'node:timers';
 import { fileURLToPath, URL } from 'node:url';
 
 // These tests run the real installers with only the network and the
@@ -106,12 +107,63 @@ curl() {
 }
 ditto() {
   printf 'ditto\n' >> "$FAKE_LOG"
+  if [ "\${FAKE_PORTABLE_MAC:-}" = 1 ]; then
+    local destination="$2"
+    if [ "$1" = -x ]; then destination="$4/Imnota.app"; fi
+    mkdir -p "$destination"
+    cp -R "$FAKE_MAC_BUNDLE/." "$destination/"
+    if [ "$1" != -x ]; then
+      [ "\${FAKE_MAC_MISSING_EXECUTABLE:-}" != 1 ] || rm "$destination/Contents/MacOS/Imnota"
+      [ "\${FAKE_MAC_COPY_FAILURE:-}" != 1 ] || return 1
+    fi
+    return 0
+  fi
   [ "\${FAKE_NATIVE_DITTO:-}" = 1 ] || return 1
   if [ "$1" != -x ] && [ "\${FAKE_MAC_COPY_FAILURE:-}" = 1 ]; then return 1; fi
   command ditto "$@"
 }
-codesign() { printf 'codesign\n' >> "$FAKE_LOG"; return "\${FAKE_CODESIGN_EXIT:-1}"; }
-open() { printf 'open\n' >> "$FAKE_LOG"; return 0; }
+codesign() {
+  printf 'codesign\n' >> "$FAKE_LOG"
+  if [[ "\${!#}" == */Applications/Imnota.app ]] && [ "\${FAKE_MAC_VERIFY_FAILURE:-}" = 1 ]; then return 1; fi
+  return "\${FAKE_CODESIGN_EXIT:-1}"
+}
+fake_plist() {
+  local bundle="\${3%/Contents/Info.plist}"
+  if [[ "$2" == *CFBundleIdentifier ]]; then cat "$bundle/bundle-id"; else printf 13.0; fi
+}
+fake_sw_vers() { printf 14.0; }
+mv() {
+  if [[ "\${2:-}" == */previous-Imnota.app ]] && [ "\${FAKE_MAC_RESTORE_FAILURE:-}" = 1 ]; then return 1; fi
+  command mv "$@" || return $?
+  if [[ "\${3:-}" == */previous-Imnota.app ]] && [ "\${FAKE_MAC_INTERRUPT:-}" = 1 ]; then kill -TERM "$$"; fi
+}
+/usr/bin/pgrep() {
+  if [ "\${FAKE_OLD_RUNNING:-0}" = 1 ] && [ ! -f "$FAKE_LOG.quit" ]; then printf '100\n'; return 0; fi
+  [ "\${FAKE_LAUNCHED:-0}" = 1 ] || return 1
+  [ "\${FAKE_MAC_READINESS:-}" != missing ] || return 1
+  if [ "\${FAKE_MAC_READINESS:-}" = exits ] && [ "\${FAKE_POLL:-0}" -gt 0 ]; then return 1; fi
+  printf '200\n'
+}
+/bin/ps() {
+  if [[ "$*" == *"$$"* ]]; then printf shell; return 0; fi
+  if [[ "$*" == *-axo* ]]; then return 0; fi
+  if [ "\${FAKE_MAC_READINESS:-}" = exits ] && [ "\${FAKE_POLL:-0}" -gt 0 ]; then return 1; fi
+  if [[ "$*" == *'stat=,comm='* ]]; then
+    if [ "\${FAKE_MAC_READINESS:-}" = zombie ]; then printf 'Z '; else printf 'S '; fi
+  fi
+  if [ "$2" = stat= ]; then
+    if [ "\${FAKE_MAC_READINESS:-}" = zombie ]; then printf 'Z\n'; else printf 'S\n'; fi
+    return 0
+  fi
+  if [ "\${FAKE_MAC_READINESS:-}" = wrong-path ]; then printf '/other/Imnota.app/Contents/MacOS/Imnota\n'; return 0; fi
+  printf '%s/Imnota\n' "$(cd "$HOME/Applications/Imnota.app/Contents/MacOS" && pwd -P)"
+}
+/usr/bin/osascript() {
+  printf 'quit\n' >> "$FAKE_LOG"
+  if [ "\${FAKE_MAC_QUIT_REFUSED:-}" != 1 ]; then touch "$FAKE_LOG.quit"; fi
+}
+/bin/sleep() { command /bin/sleep 0.01; SECONDS=$((SECONDS + $1)); FAKE_POLL=$((\${FAKE_POLL:-0} + 1)); }
+open() { FAKE_LAUNCHED=1; FAKE_POLL=0; printf 'open\n' >> "$FAKE_LOG"; [ "\${FAKE_MAC_OPEN_FAILURE:-}" != 1 ]; }
 # Never execute even the synthetic AppImage.
 nohup() { :; }
 install() {
@@ -132,6 +184,15 @@ function runShellInstaller(
     nativeDitto = false,
     codesignExit = 1,
     macCopyFailure = false,
+    portableMac = false,
+    macVerifyFailure = false,
+    macMissingExecutable = false,
+    macRestoreFailure = false,
+    macInterrupt = false,
+    macOpenFailure = false,
+    macRunning = false,
+    macQuitRefused = false,
+    macReadiness = '',
   } = {},
 ) {
   assert.ok(bash, 'Bash is required for this test');
@@ -145,12 +206,33 @@ function runShellInstaller(
     FAKE_NATIVE_DITTO: nativeDitto ? '1' : '',
     FAKE_CODESIGN_EXIT: String(codesignExit),
     FAKE_MAC_COPY_FAILURE: macCopyFailure ? '1' : '',
+    FAKE_PORTABLE_MAC: portableMac ? '1' : '',
+    FAKE_MAC_BUNDLE: slashes(path.join(directories.root, 'fixture.app')),
+    FAKE_MAC_VERIFY_FAILURE: macVerifyFailure ? '1' : '',
+    FAKE_MAC_MISSING_EXECUTABLE: macMissingExecutable ? '1' : '',
+    FAKE_MAC_RESTORE_FAILURE: macRestoreFailure ? '1' : '',
+    FAKE_MAC_INTERRUPT: macInterrupt ? '1' : '',
+    FAKE_MAC_OPEN_FAILURE: macOpenFailure ? '1' : '',
+    FAKE_OLD_RUNNING: macRunning ? '1' : '',
+    FAKE_MAC_QUIT_REFUSED: macQuitRefused ? '1' : '',
+    FAKE_MAC_READINESS: macReadiness,
     FAKE_LOG: slashes(directories.log),
     FAKE_RELEASES: slashes(directories.releases),
     FAKE_LATEST_URL: latest ?? '',
     IMNOTA_RELEASE_TAG: tag ?? '',
   };
-  return spawnSync(bash, ['-c', bashFakes, 'test', slashes(shellInstaller)], {
+  let script = shellInstaller;
+  if (portableMac) {
+    script = path.join(directories.root, 'portable-installer.sh');
+    fs.writeFileSync(
+      script,
+      fs
+        .readFileSync(shellInstaller, 'utf8')
+        .replaceAll('/usr/libexec/PlistBuddy', 'fake_plist')
+        .replaceAll('/usr/bin/sw_vers', 'fake_sw_vers'),
+    );
+  }
+  return spawnSync(bash, ['-c', bashFakes, 'test', slashes(script)], {
     encoding: 'utf8',
     env,
   });
@@ -511,7 +593,7 @@ function publishMacBundle(directories, { minimum = '10.0.0', executable = true }
   fs.writeFileSync(
     path.join(contents, 'Info.plist'),
     `<?xml version="1.0" encoding="UTF-8"?>
-<plist version="1.0"><dict><key>LSMinimumSystemVersion</key><string>${minimum}</string></dict></plist>`,
+<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.dytschgo.imnota</string><key>LSMinimumSystemVersion</key><string>${minimum}</string></dict></plist>`,
   );
   if (executable) fs.writeFileSync(path.join(contents, 'MacOS', 'Imnota'), appImage, { mode: 0o755 });
   fs.writeFileSync(path.join(bundle, 'marker'), 'verified bundle');
@@ -529,15 +611,314 @@ function publishMacBundle(directories, { minimum = '10.0.0', executable = true }
 
 function keepExistingMacApp(directories) {
   const app = path.join(directories.home, 'Applications', 'Imnota.app');
-  fs.mkdirSync(app, { recursive: true });
+  macBackup(path.dirname(app), 'Imnota.app');
+  fs.writeFileSync(
+    path.join(app, 'Contents', 'Info.plist'),
+    '<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.dytschgo.imnota</string></dict></plist>',
+  );
   fs.writeFileSync(path.join(app, 'marker'), 'previous installation');
   return app;
 }
 
+function macBackup(parent, name, id = 'com.dytschgo.imnota') {
+  const bundle = path.join(parent, name);
+  fs.mkdirSync(path.join(bundle, 'Contents'), { recursive: true });
+  fs.writeFileSync(path.join(bundle, 'bundle-id'), id);
+  fs.writeFileSync(path.join(bundle, 'marker'), 'preserve');
+  return bundle;
+}
+
+function publishPortableMacBundle(directories) {
+  const bundle = macBackup(directories.root, 'fixture.app');
+  fs.mkdirSync(path.join(bundle, 'Contents', 'MacOS'));
+  fs.writeFileSync(path.join(bundle, 'Contents', 'MacOS', 'Imnota'), appImage, { mode: 0o755 });
+  fs.writeFileSync(path.join(bundle, 'marker'), 'verified bundle');
+  publish(directories, 'v1.2.3', {
+    'Imnota-mac.zip': 'zip',
+    'SHA256SUMS.txt': checksumLine('Imnota-mac.zip', 'zip'),
+  });
+}
+
+const portableMacOptions = { platform: 'Darwin', tag: 'v1.2.3', portableMac: true, codesignExit: 0 };
+
+test('macOS repeated installs retire only identified Imnota backups', { skip: !bash }, (t) => {
+  const directories = sandbox(t);
+  const app = keepExistingMacApp(directories);
+  const parent = path.dirname(app);
+  publishPortableMacBundle(directories);
+  const retired = [
+    macBackup(parent, 'Imnota-backup-20260101-010101.app'),
+    macBackup(parent, 'Imnota Backup 1.2.0 20260101-010101 42.app'),
+    macBackup(parent, '.imnota-backups.noindex/Imnota.app'),
+    macBackup(parent, '.imnota-backups.noindex/.rollback-123.app'),
+  ];
+  const preserved = [
+    macBackup(parent, 'Imnota-backup-20260102-010101.app', 'com.example.other'),
+    macBackup(parent, 'Imnota Backup 1.2.0 20260102-010101 42.app', 'com.example.other'),
+    macBackup(parent, 'Imnota-backup-my-project.app'),
+    macBackup(parent, 'User Project.app'),
+    macBackup(parent, '.imnota-backups.noindex/Other.app'),
+    macBackup(parent, '.imnota-backups.noindex/.rollback-foreign.app', 'com.example.other'),
+  ];
+  for (let iteration = 0; iteration < 3; iteration++) {
+    const result = runShellInstaller(directories, portableMacOptions);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.readFileSync(path.join(app, 'marker'), 'utf8'), 'verified bundle');
+    for (const bundle of retired) assert.equal(fs.existsSync(bundle), false, bundle);
+    for (const bundle of preserved)
+      assert.equal(fs.readFileSync(path.join(bundle, 'marker'), 'utf8'), 'preserve', bundle);
+    assert.equal(
+      fs.readdirSync(parent).some((name) => name.startsWith('.imnota-install.')),
+      false,
+    );
+    assert.equal(fs.existsSync(path.join(parent, '.imnota-update.lock')), false);
+    assertNoTemporaryFiles(directories);
+  }
+});
+
+test('macOS removes the empty managed backup directory after success', { skip: !bash }, (t) => {
+  const directories = sandbox(t);
+  const app = keepExistingMacApp(directories);
+  macBackup(path.dirname(app), '.imnota-backups.noindex/Imnota.app');
+  publishPortableMacBundle(directories);
+  const result = runShellInstaller(directories, portableMacOptions);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(fs.readdirSync(path.dirname(app)), ['Imnota.app']);
+  assertNoTemporaryFiles(directories);
+});
+
+test(
+  'macOS copy, final verification and open failures restore the old app without retiring backups',
+  { skip: !bash },
+  (t) => {
+    for (const options of [
+      { macCopyFailure: true },
+      { macVerifyFailure: true },
+      { macMissingExecutable: true },
+      { macOpenFailure: true },
+    ]) {
+      const directories = sandbox(t);
+      const app = keepExistingMacApp(directories);
+      const legacy = macBackup(path.dirname(app), 'Imnota-backup-20260101-010101.app');
+      publishPortableMacBundle(directories);
+      const result = runShellInstaller(directories, { ...portableMacOptions, ...options });
+      assert.equal(result.status, 1, result.stderr);
+      assert.match(result.stderr, /previous Imnota app was restored/);
+      assert.equal(fs.readFileSync(path.join(app, 'marker'), 'utf8'), 'previous installation');
+      assert.equal(fs.readFileSync(path.join(legacy, 'marker'), 'utf8'), 'preserve');
+      assert.deepEqual(fs.readdirSync(path.dirname(app)).sort(), [
+        'Imnota-backup-20260101-010101.app',
+        'Imnota.app',
+      ]);
+      assert.equal(requests(directories).includes('open'), !!options.macOpenFailure);
+      assertNoTemporaryFiles(directories);
+    }
+  },
+);
+
+test('macOS failed first install removes the partial bundle', { skip: !bash }, (t) => {
+  const directories = sandbox(t);
+  publishPortableMacBundle(directories);
+  const result = runShellInstaller(directories, { ...portableMacOptions, macCopyFailure: true });
+  assert.equal(result.status, 1, result.stderr);
+  assert.deepEqual(fs.readdirSync(path.join(directories.home, 'Applications')), []);
+  assertNoTemporaryFiles(directories);
+});
+
+test(
+  'macOS preserves recovery files and reports their path if automatic restore fails',
+  { skip: !bash },
+  (t) => {
+    const directories = sandbox(t);
+    const app = keepExistingMacApp(directories);
+    publishPortableMacBundle(directories);
+    const result = runShellInstaller(directories, {
+      ...portableMacOptions,
+      macCopyFailure: true,
+      macRestoreFailure: true,
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /Automatic restore failed.*previous app is preserved at/);
+    const staging = fs.readdirSync(path.dirname(app)).filter((name) => name.startsWith('.imnota-install.'));
+    assert.equal(staging.length, 1);
+    const recovery = path.join(path.dirname(app), staging[0]);
+    assert.equal(
+      fs.readFileSync(path.join(recovery, 'previous-Imnota.app', 'marker'), 'utf8'),
+      'previous installation',
+    );
+    assert.equal(
+      fs.readFileSync(path.join(recovery, 'failed-Imnota.app', 'marker'), 'utf8'),
+      'verified bundle',
+    );
+    assert.equal(fs.existsSync(app), false);
+    assertNoTemporaryFiles(directories);
+  },
+);
+
+test('macOS interruption immediately after moving the previous app restores it', { skip: !bash }, (t) => {
+  const directories = sandbox(t);
+  const app = keepExistingMacApp(directories);
+  publishPortableMacBundle(directories);
+  const result = runShellInstaller(directories, { ...portableMacOptions, macInterrupt: true });
+  assert.equal(result.status, 130, result.stderr);
+  assert.match(result.stderr, /previous Imnota app was restored/);
+  assert.equal(fs.readFileSync(path.join(app, 'marker'), 'utf8'), 'previous installation');
+  assert.deepEqual(fs.readdirSync(path.dirname(app)), ['Imnota.app']);
+  assertNoTemporaryFiles(directories);
+});
+
+test('macOS respects another transaction lock and leaves its rollback untouched', { skip: !bash }, (t) => {
+  const directories = sandbox(t);
+  const app = keepExistingMacApp(directories);
+  const parent = path.dirname(app);
+  const lock = path.join(parent, '.imnota-update.lock');
+  fs.mkdirSync(lock);
+  fs.writeFileSync(path.join(lock, 'pid'), '123');
+  const rollback = macBackup(parent, '.imnota-backups.noindex/.rollback-123.app');
+  publishPortableMacBundle(directories);
+  const result = runShellInstaller(directories, portableMacOptions);
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /Another install\/update may be running/);
+  assert.equal(fs.readFileSync(path.join(lock, 'pid'), 'utf8'), '123');
+  assert.equal(fs.readFileSync(path.join(rollback, 'marker'), 'utf8'), 'preserve');
+  assert.equal(fs.readFileSync(path.join(app, 'marker'), 'utf8'), 'previous installation');
+  assertNoTemporaryFiles(directories);
+});
+
+test('macOS refuses an unidentified Imnota.app and preserves personal files', { skip: !bash }, (t) => {
+  for (const id of ['', 'com.example.personal']) {
+    const directories = sandbox(t);
+    const app = macBackup(path.join(directories.home, 'Applications'), 'Imnota.app', id);
+    fs.writeFileSync(path.join(app, 'personal.txt'), 'personal workspace');
+    publishPortableMacBundle(directories);
+    const result = runShellInstaller(directories, portableMacOptions);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /not an identified Imnota bundle/);
+    assert.equal(fs.readFileSync(path.join(app, 'personal.txt'), 'utf8'), 'personal workspace');
+    assert.deepEqual(fs.readdirSync(path.dirname(app)), ['Imnota.app']);
+    assert.equal(requests(directories).includes('open'), false);
+    assertNoTemporaryFiles(directories);
+  }
+});
+
+test(
+  'macOS refuses a symlinked or junctioned Applications parent without cleanup outside HOME',
+  { skip: !bash },
+  (t) => {
+    const directories = sandbox(t);
+    const outside = path.join(directories.root, 'outside');
+    const old = macBackup(outside, 'Imnota.app');
+    const backup = macBackup(outside, 'Imnota-backup-20260101-010101.app');
+    fs.symlinkSync(
+      outside,
+      path.join(directories.home, 'Applications'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    publishPortableMacBundle(directories);
+    const result = runShellInstaller(directories, portableMacOptions);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /Applications folder.*symlink|physical directory/);
+    assert.deepEqual(fs.readdirSync(outside).sort(), ['Imnota-backup-20260101-010101.app', 'Imnota.app']);
+    for (const bundle of [old, backup])
+      assert.equal(fs.readFileSync(path.join(bundle, 'marker'), 'utf8'), 'preserve');
+    assertNoTemporaryFiles(directories);
+  },
+);
+
+test(
+  'macOS cleanup preserves symlinked or junctioned backup candidates and managed roots',
+  { skip: !bash },
+  (t) => {
+    for (const managed of [false, true]) {
+      const directories = sandbox(t);
+      const app = keepExistingMacApp(directories);
+      const outside = path.join(directories.root, 'outside');
+      const bundle = macBackup(outside, 'Imnota.app');
+      const link = path.join(
+        path.dirname(app),
+        managed ? '.imnota-backups.noindex' : 'Imnota-backup-20260101-010101.app',
+      );
+      fs.symlinkSync(managed ? outside : bundle, link, process.platform === 'win32' ? 'junction' : 'dir');
+      publishPortableMacBundle(directories);
+      const result = runShellInstaller(directories, portableMacOptions);
+      assert.equal(result.status, 0, result.stderr);
+      assert.ok(fs.lstatSync(link).isSymbolicLink());
+      assert.equal(fs.readFileSync(path.join(bundle, 'marker'), 'utf8'), 'preserve');
+      assertNoTemporaryFiles(directories);
+    }
+  },
+);
+
+// The holder is a separate Bash process. It signals only after acquire_lock;
+// stdin releases it, so the contender overlaps an observable live transaction.
+test(
+  'macOS installer refuses a concurrently running updater and leaves its rollback intact',
+  { skip: !bash },
+  async (t) => {
+    const directories = sandbox(t);
+    const app = keepExistingMacApp(directories);
+    const parent = path.dirname(app);
+    const rollback = macBackup(parent, '.imnota-backups.noindex/.rollback-123.app');
+    publishPortableMacBundle(directories);
+    const updater = fileURLToPath(new URL('./update-macos.sh', import.meta.url));
+    // Match update-macos.test.mjs: retain native macOS mode/ACL checks, use GNU
+    // modes on Linux, and model mode bits on Git Bash (which cannot enforce them).
+    const privateDirectoryShims =
+      process.platform === 'darwin'
+        ? ''
+        : `
+directory_mode() { ${process.platform === 'win32' ? 'printf 700' : '/usr/bin/stat -c "%a" "$1"'}; }
+directory_acl_entries() { :; }
+/bin/chmod() { if [[ "$1" == -N ]]; then return 0; fi; command /bin/chmod "$@"; }
+`;
+    const holder = spawn(
+      bash,
+      [
+        '-c',
+        `source "$1"
+${privateDirectoryShims}
+trap cleanup EXIT
+acquire_lock "$(cd "$2" && pwd -P)"
+printf "locked\\n"
+read -r release`,
+        'holder',
+        slashes(updater),
+        slashes(parent),
+      ],
+      { stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+    t.after(() => {
+      if (!holder.stdin.destroyed) holder.stdin.end('release\n');
+    });
+    const exited = new Promise((resolve) => holder.on('close', resolve));
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('updater did not acquire lock')), 10000);
+      holder.stdout.once('data', () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+      holder.once('error', reject);
+      holder.once('exit', () => {
+        clearTimeout(timeout);
+        reject(new Error('updater exited before lock handoff'));
+      });
+    });
+    const result = runShellInstaller(directories, portableMacOptions);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /Another install\/update may be running/);
+    assert.equal(fs.readFileSync(path.join(app, 'marker'), 'utf8'), 'previous installation');
+    assert.equal(fs.readFileSync(path.join(rollback, 'marker'), 'utf8'), 'preserve');
+    assert.ok(fs.existsSync(path.join(parent, '.imnota-update.lock', 'pid')));
+    holder.stdin.end('release\n');
+    assert.equal(await exited, 0);
+    assert.equal(fs.existsSync(path.join(parent, '.imnota-update.lock')), false);
+  },
+);
+
 const nativeMacOptions = { platform: 'Darwin', tag: 'v1.2.3', nativeDitto: true, codesignExit: 0 };
 
 test(
-  'macOS installs a verified synthetic bundle with native ditto and preserves the previous app',
+  'macOS installs a verified synthetic bundle with native ditto and removes the transaction rollback',
   { skip: nativeMacSkip },
   (t) => {
     const directories = sandbox(t);
@@ -549,17 +930,15 @@ test(
     assert.equal(fs.readFileSync(path.join(app, 'marker'), 'utf8'), 'verified bundle');
     assert.equal(fs.readFileSync(path.join(app, 'Contents', 'MacOS', 'Imnota'), 'utf8'), appImage);
     const backups = fs.readdirSync(path.dirname(app)).filter((name) => /^Imnota-backup-.*\.app$/.test(name));
-    assert.equal(backups.length, 1);
-    assert.equal(
-      fs.readFileSync(path.join(path.dirname(app), backups[0], 'marker'), 'utf8'),
-      'previous installation',
-    );
+    assert.equal(backups.length, 0);
+    assert.deepEqual(fs.readdirSync(path.dirname(app)), ['Imnota.app']);
     assert.deepEqual(requests(directories), [
       `${releaseRoot}/download/v1.2.3/Imnota-mac.zip`,
       `${releaseRoot}/download/v1.2.3/SHA256SUMS.txt`,
       'ditto',
       'codesign',
       'ditto',
+      'codesign',
       'open',
     ]);
     assertNoTemporaryFiles(directories);
@@ -600,27 +979,23 @@ test(
   },
 );
 
-test(
-  'macOS preserves a recoverable backup when copying the verified bundle fails',
-  { skip: nativeMacSkip },
-  (t) => {
-    const directories = sandbox(t);
-    const app = keepExistingMacApp(directories);
-    publishMacBundle(directories);
-    const result = runShellInstaller(directories, { ...nativeMacOptions, macCopyFailure: true });
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /Installation failed.*previous app is preserved/);
-    const names = fs.readdirSync(path.dirname(app));
-    assert.equal(names.length, 1);
-    assert.match(names[0], /^Imnota-backup-.*\.app$/);
-    assert.equal(
-      fs.readFileSync(path.join(path.dirname(app), names[0], 'marker'), 'utf8'),
-      'previous installation',
-    );
-    assert.equal(requests(directories).includes('open'), false);
-    assertNoTemporaryFiles(directories);
-  },
-);
+test('macOS restores the previous app when native copying fails', { skip: nativeMacSkip }, (t) => {
+  const directories = sandbox(t);
+  const app = keepExistingMacApp(directories);
+  publishMacBundle(directories);
+  const result = runShellInstaller(directories, { ...nativeMacOptions, macCopyFailure: true });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /previous Imnota app was restored/);
+  const names = fs.readdirSync(path.dirname(app));
+  assert.equal(names.length, 1);
+  assert.equal(names[0], 'Imnota.app');
+  assert.equal(
+    fs.readFileSync(path.join(path.dirname(app), names[0], 'marker'), 'utf8'),
+    'previous installation',
+  );
+  assert.equal(requests(directories).includes('open'), false);
+  assertNoTemporaryFiles(directories);
+});
 
 const powershellHarness = String.raw`
 param([string]$Script)
@@ -896,3 +1271,51 @@ for (const shell of powershells) {
     },
   );
 }
+
+for (const readiness of ['missing', 'exits', 'wrong-path', 'zombie']) {
+  test(`macOS accepted open with replacement ${readiness} restores rollback`, { skip: !bash }, (t) => {
+    const directories = sandbox(t);
+    const app = keepExistingMacApp(directories);
+    const legacy = macBackup(path.dirname(app), 'Imnota-backup-20260101-010101.app');
+    publishPortableMacBundle(directories);
+    const result = runShellInstaller(directories, { ...portableMacOptions, macReadiness: readiness });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /replacement.*(running|exited)|reopened/i);
+    assert.equal(fs.readFileSync(path.join(app, 'marker'), 'utf8'), 'previous installation');
+    assert.equal(fs.readFileSync(path.join(legacy, 'marker'), 'utf8'), 'preserve');
+    assertNoTemporaryFiles(directories);
+  });
+}
+
+test('macOS running app refusing to quit aborts before replacement', { skip: !bash }, (t) => {
+  const directories = sandbox(t);
+  const app = keepExistingMacApp(directories);
+  const inode = fs.statSync(app).ino;
+  publishPortableMacBundle(directories);
+  const result = runShellInstaller(directories, {
+    ...portableMacOptions,
+    macRunning: true,
+    macQuitRefused: true,
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /did not quit.*60 seconds/);
+  assert.match(result.stderr, /No installed app was changed/);
+  assert.equal(fs.statSync(app).ino, inode);
+  assert.equal(fs.readFileSync(path.join(app, 'marker'), 'utf8'), 'previous installation');
+  assert.equal(requests(directories).includes('open'), false);
+  assert.deepEqual(fs.readdirSync(path.dirname(app)), ['Imnota.app']);
+  assertNoTemporaryFiles(directories);
+});
+
+test('macOS running app quits before observed replacement retires rollback', { skip: !bash }, (t) => {
+  const directories = sandbox(t);
+  const app = keepExistingMacApp(directories);
+  publishPortableMacBundle(directories);
+  const result = runShellInstaller(directories, { ...portableMacOptions, macRunning: true });
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(requests(directories).includes('quit'));
+  assert.ok(requests(directories).indexOf('quit') < requests(directories).indexOf('open'));
+  assert.match(result.stdout, /Observed.*replacement/);
+  assert.equal(fs.readFileSync(path.join(app, 'marker'), 'utf8'), 'verified bundle');
+  assert.deepEqual(fs.readdirSync(path.dirname(app)), ['Imnota.app']);
+});

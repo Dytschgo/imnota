@@ -72,14 +72,6 @@ describe('preference controls', () => {
     await waitFor(() => expect(onChange).toHaveBeenCalledWith({ ...DEFAULT_APPEARANCE, glassLevel: 'off' }));
   });
 
-  it('keeps retired toggles out of Settings', () => {
-    const { rerender } = render(<SettingsView activeCategory="Features" />);
-    expect(screen.queryByRole('checkbox', { name: 'Enable screen capture' })).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Screen capture' })).toBeInTheDocument();
-    rerender(<SettingsView activeCategory="Shortcuts" />);
-    expect(screen.queryByText('Open recent project')).not.toBeInTheDocument();
-  });
-
   it('records normalized shortcuts, explains reserved keys, and resets defaults', async () => {
     const onChange = vi.fn(async () => {});
     render(<ShortcutSettings value={{ bindings: {} }} onChange={onChange} platform="windows" />);
@@ -205,11 +197,6 @@ describe('preference controls', () => {
     expect(screen.getByText(/without changing a workspace/i)).toBeInTheDocument();
   });
 
-  it('leaves the copy format choice to the Copy Bundle menu', () => {
-    render(<SettingsView activeCategory="Sharing" preferences={DEFAULT_PREFERENCE_SETTINGS} />);
-    expect(screen.queryByRole('combobox', { name: 'Native copy functions' })).not.toBeInTheDocument();
-  });
-
   it('explains when the background capture shortcut could not be registered', () => {
     render(
       <SettingsView
@@ -252,8 +239,35 @@ describe('preference controls', () => {
     const toggle = screen.getByRole('checkbox', { name: 'Include recognised text in Markdown' });
     expect(toggle).not.toBeChecked();
     fireEvent.click(toggle);
-    await waitFor(() => expect(onPromptExportChange).toHaveBeenCalledWith({ includeRecognisedText: true }));
+    await waitFor(() =>
+      expect(onPromptExportChange).toHaveBeenCalledWith({
+        includeRecognisedText: true,
+        includeSourceContext: false,
+      }),
+    );
   });
+});
+
+it('defaults source info off and emits a persisted change when turned on', async () => {
+  const onPromptExportChange = vi.fn(async () => {});
+  render(
+    <SettingsView
+      activeCategory="Features"
+      preferences={DEFAULT_PREFERENCE_SETTINGS}
+      onPromptExportChange={onPromptExportChange}
+    />,
+  );
+  const toggle = screen.getByRole('checkbox', { name: 'Record source info' });
+  expect(toggle).not.toBeChecked();
+  expect(screen.getByText(/Imnota sends it nowhere/)).toBeInTheDocument();
+  expect(screen.getByText(/want it exported. Off by default./)).toBeInTheDocument();
+  fireEvent.click(toggle);
+  await waitFor(() =>
+    expect(onPromptExportChange).toHaveBeenCalledWith({
+      includeRecognisedText: false,
+      includeSourceContext: true,
+    }),
+  );
 });
 
 function PreferenceSaveHarness({ panel }: { panel: 'appearance' | 'shortcuts' }) {

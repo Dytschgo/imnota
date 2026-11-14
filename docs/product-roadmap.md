@@ -12,6 +12,10 @@ The roadmap is ordered by user value and implementation risk. The mixed-content 
 
 ## Now: validate the shipped foundation
 
+### Decision: macOS support
+
+Owner decision, 2026-10-15: Intel Macs are no longer tested or supported. Apple Silicon is the only macOS acceptance target. Mac builds remain universal (x86_64 + arm64) until a separate packaging decision; including Intel binaries does not imply Intel testing or support. Windows and Linux remain supported platforms.
+
 ### Approved scope: optional local agent access
 
 The September 21 PR review and nightly request includes the optional local MCP interface in PR #104. Its scope is read-only access to the selected local workspace and already prepared bundles, enabled explicitly in Settings. It adds no hosted model calls, account, upload, telemetry, capture command, or editor configuration changes. Browser-origin and non-loopback requests are rejected; workspace containment, links, recovery files and sharing secrets remain guarded. A busy port must leave access disabled with an actionable error. Users can turn access off to close the listener; existing workspace files and exports remain unchanged.
@@ -152,7 +156,9 @@ Do not claim full compatibility until import -> edit -> export round trips prese
 
 ## Proposed: next capture and hand-off features
 
-The [next features plan](next-features-plan.md) sequences a quick-access overlay, on-device OCR on macOS and Linux, redaction suggestions, agent hand-off through MCP and a CLI, scrolling capture, short clips reduced to key frames, a browser-context extension and issue creation. The browser extension and issue creation add new surfaces and need a product decision recorded here before implementation.
+The approved first quick-access slice is implemented on its feature branch and remains unreleased: an optional left/right window retains session captures for explicit Copy, Annotate, native Drag PNG, Add to a chosen collection, or Discard. Existing preferences default to Off. It adds no account, upload, telemetry or hosted AI call. Session limits, quit confirmation and failure/retry behavior are documented in the [user guide](user-guide.md#optional-pending-captures-unreleased); native evidence and remaining checks are recorded in the [implementation status](implementation-plan.md#unreleased-persistent-quick-capture-access). Automatic expiry and copy-with-context are outside this approved slice.
+
+The remaining [next features plan](next-features-plan.md) proposals include on-device OCR on macOS and Linux, redaction suggestions, further agent hand-off through MCP and a CLI, scrolling capture, short clips reduced to key frames, a browser-context extension and issue creation. The browser extension and issue creation add new surfaces and need a product decision recorded here before implementation.
 
 ## Explicitly not planned in this roadmap
 

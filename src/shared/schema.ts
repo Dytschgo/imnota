@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { screenshotSourceSchema } from './source-context.js';
 import type { ProjectData } from './types.js';
 import type { ContentItem } from './content-items.js';
 import { DEFAULT_EXPORT_PREFERENCES } from './utils.js';
@@ -46,6 +47,8 @@ export const screenshotSchema = z.object({
   originalHeight: z.number().positive(),
   includeInExport: z.boolean().default(true),
   conflict: z.boolean().optional(),
+  // A damaged source record is dropped rather than making the whole project unreadable.
+  source: screenshotSourceSchema.optional().catch(undefined),
 });
 
 const contentItemBaseSchema = z.object({
@@ -91,6 +94,14 @@ const projectFields = {
         createdAt: z.string(),
         updatedAt: z.string(),
         overallContext: z.string(),
+        comparison: z
+          .object({
+            kind: z.enum(['current-expected', 'before-after']),
+            leftId: z.string().min(1).max(200),
+            rightId: z.string().min(1).max(200),
+          })
+          .refine((pair) => pair.leftId !== pair.rightId, 'Choose two different screenshots.')
+          .optional(),
       }),
     )
     .min(1)
@@ -245,6 +256,17 @@ export function validateProject(value: unknown): ProjectData {
     throw new Error('Project contains invalid collection references.');
   const allIds = [...parsed.screenshots.map((item) => item.id), ...contentItems.map((item) => item.id)];
   if (hasDuplicates(allIds)) throw new Error('Project contains duplicate content IDs.');
+  for (const collection of parsed.collections) {
+    if (!collection.comparison) continue;
+    for (const id of [collection.comparison.leftId, collection.comparison.rightId]) {
+      // Deleted members intentionally remain missing so Undo can restore their relationship.
+      if (
+        allIds.includes(id) &&
+        !parsed.screenshots.some((shot) => shot.id === id && shot.collectionId === collection.id)
+      )
+        throw new Error('Comparison members must be screenshots in the same collection.');
+    }
+  }
   if (
     hasDuplicates(
       parsed.screenshots.map((shot) => portablePathKey(`${shot.collectionId}/${shot.storedFilename}`)),

@@ -1,7 +1,6 @@
 import type { ContentSearchRequest } from '../src/shared/content-search.js';
-import type { ProjectIconKey } from '../src/shared/project-icons.js';
 import { validateProject } from '../src/shared/schema.js';
-import type { ProjectData } from '../src/shared/types.js';
+import type { ProjectData, ProjectMetadataPatch } from '../src/shared/types.js';
 import { emptyProject, nowIso } from '../src/shared/utils.js';
 import { addEmptyCollection, ensureCollection } from './collections.js';
 import { preserveMixedProjectMetadata } from './content-project-metadata.js';
@@ -112,7 +111,7 @@ export function registerProjectIpc(router: IpcRouter, host: IpcHost): void {
   handle('projects:update-metadata', async (_event, input) =>
     mutateProjectMetadata(input.projectPath, input.expectedRevision, (project) => ({
       ...project,
-      ...(input.patch as { name?: string; description?: string; icon?: ProjectIconKey }),
+      ...(input.patch as ProjectMetadataPatch),
     })),
   );
   handle('projects:set-archived', async (_event, input) =>

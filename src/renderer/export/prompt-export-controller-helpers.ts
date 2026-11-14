@@ -1,4 +1,5 @@
 import type { TextWidthMeasurer } from '../../shared/annotation-geometry';
+import { comparisonRole, comparisonSummary } from '../../shared/screenshot-comparison';
 import { EXPORT_SAFETY_MARGIN, expandedExportBounds } from '../../shared/crop';
 import {
   type MeasuredPromptScreenshot,
@@ -16,8 +17,12 @@ import type {
   WorkflowResult,
 } from '../../shared/workflow-bridge';
 import { createBrowserTextMeasurer } from '../canvas/annotation-layout';
-import { assertAnnotatedImageRenderBounds, renderAnnotatedImageWithDimensions } from '../export-image';
-import { composePromptBundle } from '../prompt-bundle-render';
+import {
+  AnnotatedImageRenderLimitError,
+  assertAnnotatedImageRenderBounds,
+  renderAnnotatedImageWithDimensions,
+} from '../export-image';
+import { composePromptBundle, PromptBundleRenderError } from '../prompt-bundle-render';
 import type { PromptBundleCardModel } from './PromptBundleCard';
 import type {
   SavedPromptExportContext,
@@ -26,6 +31,8 @@ import type {
   PromptBundleControllerError,
   PromptBundleSelection,
 } from './prompt-export-controller-core';
+
+import { controllerExportFailure, nativeExportFailure, nativeFailureCatalog } from './export-failure-catalog';
 
 /** Pure planning, limit and error helpers for the prompt export controller. */
 export interface PreparedPromptMetadata {
@@ -54,6 +61,9 @@ export interface PromptExportArtifact {
   collectionId: string;
   grants: ReadonlyMap<number, PromptExportBundleGrant>;
   snapshotFingerprint: string;
+  collectionName: string;
+  setName: string;
+  handoffItems: ReadonlyMap<number, { pictureNumbers: readonly number[]; textCount: number }>;
 }
 
 export interface ActiveRun {
@@ -98,12 +108,24 @@ export function cloneAndFreeze<T>(value: T): Readonly<T> {
 export function failure(
   code: PromptBundleControllerErrorCode,
   message: string,
-  retryable = true,
+  _retryable = true,
   fallbackAvailable = false,
   nativeCode?: WorkflowError['code'],
   technicalDetails?: string,
 ): ControllerFailure {
-  return new ControllerFailure({ code, message, retryable, fallbackAvailable, nativeCode, technicalDetails });
+  // Every failure() message is written by the renderer and names the specific bundle, picture or
+  // next step, so it stays visible. Raw IPC and OS text goes through nativeFailure/publicError instead.
+  const detail = nativeCode
+    ? {
+        ...nativeExportFailure({ code: nativeCode, message, retryable: _retryable }, fallbackAvailable),
+        message,
+        technicalDetails,
+      }
+    : controllerExportFailure(code, technicalDetails, {
+        safeMessage: code === 'unexpected' ? undefined : message,
+        fallbackAvailable,
+      });
+  return new ControllerFailure(detail);
 }
 
 export function cancelledFailure(): ControllerFailure {
@@ -115,40 +137,25 @@ export function throwIfAborted(signal: AbortSignal): void {
 }
 
 export function actionableMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message.trim() ? error.message.trim() : fallback;
+  const message =
+    typeof error === 'string'
+      ? error
+      : error && typeof error === 'object' && 'message' in error && typeof error.message === 'string'
+        ? error.message
+        : undefined;
+  return message?.trim() || fallback;
 }
 
 export function nativeFailure(error: WorkflowError, fallbackAvailable = false): ControllerFailure {
-  const messages: Partial<Record<WorkflowError['code'], string>> = {
-    'io-failure': /\bENOENT\b/.test(error.message)
-      ? 'An export file is missing. Choose Rebuild bundles to create a new copy.'
-      : 'The export files could not be read or written. Check available space and folder access, then try again.',
-    'session-not-found': 'The saved export is no longer available. Choose Rebuild bundles and try again.',
-    'bundle-not-found': 'A saved bundle is no longer available. Choose Rebuild bundles and try again.',
-    'project-not-found': 'The project is no longer available. Open it again and rebuild the bundles.',
-    'collection-not-found': 'The collection is no longer available. Open it again and rebuild the bundles.',
-    'permission-denied': 'The export folder cannot be accessed. Check its permissions and try again.',
-  };
-  return failure(
-    'native-failure',
-    messages[error.code] ?? error.message,
-    error.retryable,
-    fallbackAvailable,
-    error.code,
-    messages[error.code] ? error.message : undefined,
-  );
+  return new ControllerFailure(nativeExportFailure(error, fallbackAvailable));
 }
 
 export function cleanupPendingFailure(error: unknown): ControllerFailure {
   const detail = publicError(error);
-  return failure(
-    'cleanup-pending',
-    `The export session could not be finalized safely. Retry export cleanup before starting another export. ${detail.message}`,
-    true,
-    false,
-    detail.nativeCode,
-    detail.technicalDetails,
-  );
+  return new ControllerFailure({
+    ...controllerExportFailure('cleanup-pending', detail.technicalDetails ?? detail.message),
+    nativeCode: detail.nativeCode,
+  });
 }
 
 export function unwrap<T>(result: WorkflowResult<T>, fallbackAvailable = false): T {
@@ -245,6 +252,13 @@ export function masterMarkdown(
   ];
   const context = normalizedMarkdown(plan.overallContext);
   if (context.trim()) lines.push('## Overall context', '', context, '');
+  if (input.comparison) {
+    const visuals = (input.items ?? input.screenshots)
+      .filter((item) => item.kind !== 'text')
+      .slice()
+      .sort((a, b) => a.position - b.position);
+    lines.push(comparisonSummary(input.comparison, visuals), '');
+  }
   lines.push('## Prompt bundles', '');
   for (const bundle of plan.bundles)
     lines.push(
@@ -276,6 +290,8 @@ export function masterMarkdown(
       '',
     );
     if (item.kind === 'screenshot') {
+      const role = comparisonRole(input.comparison, item.id);
+      if (role) lines.push(`Comparison role: ${role}`, '');
       const screenshotItem = item as PromptScreenshotInput;
       lines.push(
         `Priority for agent: ${screenshotItem.priority[0].toUpperCase()}${screenshotItem.priority.slice(1)}`,
@@ -345,14 +361,37 @@ export function cardsForPlan(
 
 export function publicError(error: unknown): PromptBundleControllerError {
   if (error instanceof ControllerFailure) return error.detail;
-  const message = actionableMessage(error, 'Prompt export failed unexpectedly. Try again.');
+  const message = actionableMessage(error, 'Prompt export failed unexpectedly.');
+  if (
+    error instanceof AnnotatedImageRenderLimitError ||
+    (error && typeof error === 'object' && 'code' in error && error.code === 'ANNOTATED_IMAGE_RENDER_LIMIT')
+  )
+    return controllerExportFailure('render-limit', message, { safeMessage: message });
+  if (error instanceof PromptBundleRenderError)
+    return controllerExportFailure(error.code, message, {
+      safeMessage: error.code === 'render-limit' ? message : undefined,
+    });
+  if (
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    typeof error.code === 'string' &&
+    Object.hasOwn(nativeFailureCatalog, error.code)
+  ) {
+    const details =
+      'details' in error && error.details && typeof error.details === 'object'
+        ? (error.details as WorkflowError['details'])
+        : undefined;
+    return nativeExportFailure({
+      code: error.code as WorkflowError['code'],
+      message,
+      retryable: false,
+      details,
+    });
+  }
+  if (error instanceof DOMException && error.name === 'AbortError') return cancelledFailure().detail;
+  // Compatibility for older renderers without a typed render-limit error.
   if (/safe render|safe renderer|render limit|canvas safety|above the safe/i.test(message))
-    return { code: 'render-limit', message, retryable: true, fallbackAvailable: false };
-  return {
-    code: 'unexpected',
-    message: 'Prompt export failed unexpectedly. Try Rebuild bundles.',
-    retryable: true,
-    fallbackAvailable: false,
-    technicalDetails: error instanceof Error ? message : undefined,
-  };
+    return controllerExportFailure('render-limit', message);
+  return controllerExportFailure('unexpected', message);
 }

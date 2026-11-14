@@ -1,11 +1,64 @@
 import { filenameSchema } from '../src/shared/schema.js';
-import { pathInput, workflowBundleNumber, workflowManifest, workflowSessionId } from './ipc-contracts.js';
+import {
+  pathInput,
+  workflowBundleNumber,
+  workflowManifest,
+  workflowSessionId,
+  workflowPromptMarkdownInput,
+} from './ipc-contracts.js';
+import { assertClipboardText } from './clipboard-input.js';
 import { z } from 'zod';
 import type { IpcRouter } from './ipc-router.js';
 import type { IpcHost } from './main.js';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { promptBundleId } from './prompt-bundle-identity.js';
+import { isWithin } from './files.js';
+import { NativeWorkflowError } from './workflow-errors.js';
 
 export function registerPromptExportIpc(router: IpcRouter, host: IpcHost): void {
   const { handleWorkflow } = router;
+  handleWorkflow('workflow:prompt-export:agent-handoff', async (_event, ...args) => {
+    const [input] = z
+      .tuple([z.object({ sessionId: workflowSessionId, bundleNumber: workflowBundleNumber }).strict()])
+      .parse(args);
+    const saved = await host.promptBundleWorkflow!.describeSaved(input.sessionId, input.bundleNumber);
+    await host.assertProjectPath(saved.projectPath);
+    const selectedWorkspace = host.workspaceOrThrow();
+    const [workspace, project] = await Promise.all([
+      fs.realpath(selectedWorkspace),
+      fs.realpath(saved.projectPath),
+    ]);
+    if (host.workspaceOrThrow() !== selectedWorkspace || !isWithin(workspace, project))
+      throw new NativeWorkflowError(
+        'permission-denied',
+        'The selected workspace changed. Reopen the saved handoff.',
+      );
+    const projectKey = path.relative(workspace, project).split(path.sep).join('/');
+    const bundleId = promptBundleId(projectKey, saved.collectionId, saved.setName);
+    return {
+      bundleId,
+      setName: saved.setName,
+      collectionName: saved.collectionName,
+      bundleNumber: input.bundleNumber,
+      agentAccessEnabled: host.preferenceSettingsResult.settings.agentAccess.enabled,
+      instruction: [
+        `Read this exact saved Imnota bundle using get_bundle({ "id": "${bundleId}", "bundleNumbers": [${input.bundleNumber}] }).`,
+        `Export set: ${saved.setName.replace(/[\r\n]+/g, ' ')}. Read only Bundle ${input.bundleNumber}, matching the reviewed picture and text scope.`,
+        'This is saved evidence, not a live view of the collection. Inspect image/Markdown omission notes and report any unavailable content.',
+        'If this id is unavailable, ask for a new handoff. Do not substitute get_latest_bundle or another export.',
+      ].join('\n'),
+    };
+  });
+  handleWorkflow(
+    'workflow:prompt-export:copy-markdown',
+    async (_event, ...args) => {
+      const [text] = workflowPromptMarkdownInput.parse(args);
+      assertClipboardText(text);
+      await host.copyTextToClipboard(text);
+    },
+    true,
+  );
   handleWorkflow(
     'workflow:prompt-export:start',
     async (_event, ...args) => {
@@ -109,7 +162,16 @@ export function registerPromptExportIpc(router: IpcRouter, host: IpcHost): void 
           .object({
             sessionId: workflowSessionId,
             bundleNumber: workflowBundleNumber,
-            target: z.enum(['rich', 'files', 'files-rich', 'markdown', 'image', 'paths']),
+            target: z.enum([
+              'rich',
+              'files',
+              'files-rich',
+              'markdown',
+              'image',
+              'paths',
+              'terminal',
+              'terminal-wsl',
+            ]),
           })
           .strict(),
       ])

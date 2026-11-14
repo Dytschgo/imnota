@@ -192,6 +192,12 @@
   min-width: 0;
 }
 
+.settings-view > .settings-grid > div:not([hidden]) {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
 .settings-view > .settings-grid .settings-section,
 .settings-view > .settings-grid .imnota-preference-section,
 .settings-view > .settings-grid .imnota-backup-settings,
@@ -201,6 +207,12 @@
   border: 1px solid var(--line);
   border-radius: 9px;
   background: color-mix(in srgb, var(--surface) 92%, var(--bg));
+}
+
+/* The card border already separates the first row; its own divider drew a second line. */
+.settings-view > .settings-grid .imnota-preference-section > .imnota-preference-row:first-child {
+  padding-block-start: 0;
+  border-block-start: 0;
 }
 
 .settings-view > .settings-grid .settings-section > h2 {

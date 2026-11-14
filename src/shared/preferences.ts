@@ -61,6 +61,8 @@ export interface ShortcutPreferences {
 /** Region capture is available by default on new Windows/macOS profiles; saved values remain per-profile. */
 export interface CapturePreferences {
   experimentalRegionCapture: boolean;
+  /** Missing in existing profiles means off. Pending captures are kept until Add or Discard. */
+  quickAccessCorner?: 'off' | 'left' | 'right';
 }
 
 export function defaultExperimentalRegionCapture(platform = process.platform): boolean {
@@ -136,11 +138,14 @@ export function agentAccessSetupPrompt(url = localAgentAccessUrl()): string {
     'Requirements: Imnota must be running with "Allow local agent access" enabled in Settings → Features; otherwise the connection is refused. Nothing is uploaded and no hosted model is called.',
     '',
     'Tools the server exposes (all read-only):',
-    '- list_projects: active projects in the selected workspace (path, name, updated time).',
-    '- list_collections: pass projectPath to discover collection ids and up to ten recent prepared bundle ids per collection, including archived collections.',
-    '- list_collection_items: ordered items of a collection (id, kind, title, includeInExport, priority).',
+    '- list_projects: active projects by default (path, name, updated time); scope:archived or scope:all explicitly discovers archived projects.',
+    '- list_collections: pass projectPath to discover collections and up to ten recent bundle ids, with total counts and an explicit truncation flag; includes archived collections. Filename timestamps do not certify freshness.',
+    '- list_collection_items: ordered items (id, kind, title, includeInExport, priority), each with its get_item next action.',
     '- get_latest_bundle: the latest saved export as Markdown text plus PNG image blocks. No arguments searches active projects and collections; projectPath narrows to a project; projectPath and collectionId select a collection. Returns "bundle not prepared" when no readable export exists; it never generates an export.',
+    '- list_new_since: ids, paths and times of saved exports newer than since (local YYYY-MM-DDTHH:MM:SS), newest first; without since, the most recent ones. Read each with get_bundle. When more is true, repeat the same query with nextCursor as cursor before advancing since; restart and deduplicate ids if a cursor becomes unavailable.',
     '- get_bundle: pass an id from list_collections or get_latest_bundle to read that saved export. Returns "bundle not found" if it was removed or is no longer accessible.',
+    '- inspect_bundle: pass a discovered id to inspect ordered file sizes and read limits without receiving Markdown or images. Content and freshness are not verified; use get_bundle to read it.',
+    'For get_bundle and get_latest_bundle, use includeImages:false for text-only reads and bundleNumbers:[1,3] to retrieve selected saved parts. inspect_bundle provides a text-only next action per part. Missing selected parts are an error; no export is regenerated.',
     '- get_item: one item as Markdown plus its image path for screenshots and drawings.',
     '- search_saved_text: search saved descriptions, annotation text, Markdown blocks and drawing text.',
     'Prepared bundles are saved snapshots and may predate current edits. Read the returned omission notes: each call returns at most 10 PNGs, 5 MB per PNG, 20 MB of PNGs total, and 4 MB of Markdown. Paths identify omitted files; no export is regenerated.',
@@ -170,6 +175,11 @@ export interface ExportPreset {
 /** Application export Markdown options. Not stored on project.json. */
 export interface PromptExportPreferences {
   includeRecognisedText: boolean;
+  /**
+   * Record app, window title and time at capture or import, and write them into exported
+   * Markdown. Stays on this device unless the user shares an export. Off by default.
+   */
+  includeSourceContext: boolean;
 }
 
 export interface PreferenceSettings {
@@ -232,7 +242,10 @@ export const DEFAULT_WORKBENCH: WorkbenchPreferences = {
 export const DEFAULT_UPDATE_PREFERENCES: UpdatePreferences = {};
 export const DEFAULT_NATIVE_COPY_PREFERENCES: NativeCopyPreferences = { defaultFunction: 'files' };
 export const DEFAULT_AGENT_ACCESS: AgentAccessPreferences = { enabled: false };
-export const DEFAULT_PROMPT_EXPORT_PREFERENCES: PromptExportPreferences = { includeRecognisedText: false };
+export const DEFAULT_PROMPT_EXPORT_PREFERENCES: PromptExportPreferences = {
+  includeRecognisedText: false,
+  includeSourceContext: false,
+};
 
 export const DEFAULT_PREFERENCE_SETTINGS: PreferenceSettings = {
   appearance: DEFAULT_APPEARANCE,
