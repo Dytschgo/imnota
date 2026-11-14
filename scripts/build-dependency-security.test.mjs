@@ -26,9 +26,9 @@ test('the Vite server denies private fixture files even with import queries', as
     });
     await server.listen();
     const url = `http://127.0.0.1:${server.httpServer.address().port}`;
-    assert.equal(await (await fetch(`${url}/normal.txt`)).text(), 'synthetic public fixture');
+    assert.equal(await (await globalThis.fetch(`${url}/normal.txt`)).text(), 'synthetic public fixture');
     for (const query of ['?raw', '?import&raw', '?import&url&inline']) {
-      const response = await fetch(`${url}/.env${query}`);
+      const response = await globalThis.fetch(`${url}/.env${query}`);
       assert.ok(response.status === 403 || response.status === 404, `${query}: ${response.status}`);
       assert.ok(!(await response.text()).includes('fixture-owned-private-value'));
     }
