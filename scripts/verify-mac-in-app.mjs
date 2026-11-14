@@ -12,11 +12,14 @@ import { URL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { setTimeout as schedule, clearTimeout as cancel } from 'node:timers';
 import { createRequire } from 'node:module';
+import { probeReleaseCheck } from './release-check-probe.mjs';
 
 assert.equal(process.platform, 'darwin', 'Requires macOS');
 assert.equal(process.env.GITHUB_ACTIONS, 'true', 'Requires disposable GitHub Actions');
 assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted', 'Refuses self-hosted or personal Macs');
 assert.ok(process.env.RUNNER_TEMP);
+const ciReleaseToken = process.env.IMNOTA_CI_RELEASE_TOKEN;
+delete process.env.IMNOTA_CI_RELEASE_TOKEN;
 const run = promisify(execFile);
 const appPath = '/Applications/Imnota.app';
 const executable = `${appPath}/Contents/MacOS/Imnota`;
@@ -70,6 +73,7 @@ const receipt = {
   declaration:
     'Same compiled candidate application code, separately packaged with extraMetadata.version=0.0.0. Package and bundle versions agree. Every extracted application file is compared with the normal candidate except root package.json version. This is a declared older-version fixture, not the published distributable.',
   passed: false,
+  releaseMetadataAuth: ciReleaseToken ? 'workflow-read-token' : 'anonymous',
 };
 let failure;
 let owned = false,
@@ -252,6 +256,7 @@ try {
   );
   const env = { ...process.env };
   for (const key of Object.keys(env)) if (key.startsWith('IMNOTA_')) delete env[key];
+  if (ciReleaseToken) env.IMNOTA_CI_RELEASE_TOKEN = ciReleaseToken;
   child = spawn(executable, ['--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0'], {
     env,
     stdio: ['ignore', 'ignore', 'pipe'],
@@ -373,10 +378,27 @@ try {
   receipt.passed = true;
 } catch (error) {
   receipt.error = String(error);
+  failure = error;
   await run('/usr/sbin/screencapture', ['-x', path.join(evidence, 'failure-desktop.png')]).catch(
     () => undefined,
   );
-  failure = error;
+  try {
+    const [{ discoverRelease }, { terminalUpdateArguments }, { createCiReleaseMetadataRequest }] =
+      await Promise.all([
+        import('../dist-electron/electron/releases.js'),
+        import('../dist-electron/electron/terminal-update.js'),
+        import('../dist-electron/electron/release-metadata-request.js'),
+      ]);
+    const request = createCiReleaseMetadataRequest({
+      ...process.env,
+      IMNOTA_CI_RELEASE_TOKEN: ciReleaseToken,
+    });
+    receipt.releaseCheckProbe = await probeReleaseCheck(discoverRelease, terminalUpdateArguments, {
+      request,
+    });
+  } catch {
+    receipt.releaseCheckProbe = { status: 'unavailable' };
+  }
 } finally {
   socket?.close();
   try {

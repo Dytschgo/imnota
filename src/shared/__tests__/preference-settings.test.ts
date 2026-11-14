@@ -15,6 +15,20 @@ import {
 } from '../preferences';
 
 describe('profile-aware preference settings', () => {
+  it('keeps quick access off for older profiles and preserves chosen corners across unrelated changes and restart', () => {
+    const original = resolvePreferenceSettings(undefined, false).settings;
+    expect(original.capture.quickAccessCorner ?? 'off').toBe('off');
+    const enabled = mergePreferenceSettings(original, { capture: { quickAccessCorner: 'left' } });
+    expect(enabled.capture.experimentalRegionCapture).toBe(original.capture.experimentalRegionCapture);
+    const unrelated = mergePreferenceSettings(enabled, { nativeCopy: { defaultFunction: 'rich' } });
+    const restarted = resolvePreferenceSettings(preferenceSettingsEnvelope({}, unrelated), true).settings;
+    expect(restarted.capture.quickAccessCorner).toBe('left');
+    const disabled = mergePreferenceSettings(restarted, {
+      capture: { quickAccessCorner: 'off', experimentalRegionCapture: false },
+    });
+    expect(disabled.capture).toMatchObject({ quickAccessCorner: 'off', experimentalRegionCapture: false });
+    expect(() => preferenceSettingsUpdateSchema.parse({ capture: { quickAccessCorner: 'cloud' } })).toThrow();
+  });
   it('migrates profiles without presets and preserves presets across unrelated updates and restarts', () => {
     const initial = resolvePreferenceSettings(undefined, false);
     const legacy = { ...initial.settings };
@@ -130,7 +144,33 @@ describe('profile-aware preference settings', () => {
     expect(withoutPromptExport.settings.promptExport.includeRecognisedText).toBe(false);
     expect(
       mergePreferenceSettings(current, { promptExport: { includeRecognisedText: false } }).promptExport,
-    ).toEqual({ includeRecognisedText: false });
+    ).toEqual({ includeRecognisedText: false, includeSourceContext: false });
+    expect(withoutPromptExport.settings.promptExport.includeSourceContext).toBe(false);
+    expect(resolvePreferenceSettings(undefined, false).settings.promptExport.includeSourceContext).toBe(
+      false,
+    );
+    // A profile saved before source info existed stays off; a patch never changes it implicitly.
+    const olderPromptExport = resolvePreferenceSettings(
+      { preferences: { ...current, promptExport: { includeRecognisedText: true } } },
+      true,
+    );
+    expect(olderPromptExport.settings.promptExport).toEqual({
+      includeRecognisedText: true,
+      includeSourceContext: false,
+    });
+    expect(
+      mergePreferenceSettings(
+        current,
+        preferenceSettingsUpdateSchema.parse({ promptExport: { includeRecognisedText: true } }),
+      ).promptExport,
+    ).toEqual({ includeRecognisedText: true, includeSourceContext: false });
+    const on = mergePreferenceSettings(current, { promptExport: { includeSourceContext: true } });
+    expect(
+      mergePreferenceSettings(
+        on,
+        preferenceSettingsUpdateSchema.parse({ promptExport: { includeRecognisedText: true } }),
+      ).promptExport,
+    ).toEqual({ includeRecognisedText: true, includeSourceContext: true });
     expect(mergePreferenceSettings(current, { workbench: { screenshotFirstAdd: false } }).workbench).toEqual({
       screenshotFirstAdd: false,
     });

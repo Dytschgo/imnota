@@ -119,16 +119,9 @@ export function Library({
           )}
         </div>
       ) : (
-        <>
-          <button
-            className="search-line library-search-trigger"
-            type="button"
-            data-testid="library-full-search"
-            onClick={() => void onSearch()}
-          >
-            <Search size={16} aria-hidden="true" />
-            <span>Search workspace</span>
-          </button>
+        // One row: the inline filter is the field; the full workspace search opens a dialog,
+        // so it reads as a button instead of a second, identical-looking search box.
+        <div className="library-search-row">
           <div className="search-line">
             <Search size={16} aria-hidden="true" />
             <input
@@ -144,7 +137,17 @@ export function Library({
               </button>
             )}
           </div>
-        </>
+          <button
+            className="library-search-trigger"
+            type="button"
+            data-testid="library-full-search"
+            aria-haspopup="dialog"
+            onClick={() => void onSearch()}
+          >
+            <Search size={15} aria-hidden="true" />
+            Search workspace…
+          </button>
+        </div>
       )}
       {view === 'recent' ? (
         recent.length ? (
@@ -211,7 +214,9 @@ export function Library({
                     </div>
                     <div className="project-row-copy">
                       <strong>{project.name}</strong>
-                      <span>{project.description || 'No description yet'}</span>
+                      <span className={project.description ? undefined : 'project-row-placeholder'}>
+                        {project.description || 'No description yet'}
+                      </span>
                       <small>
                         {project.screenshots.length} screenshot{project.screenshots.length === 1 ? '' : 's'} ·
                         edited {new Date(project.updatedAt).toLocaleDateString()}

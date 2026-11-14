@@ -33,6 +33,8 @@ export interface SmokeScreenshotCanvas {
   id: string;
   originalWidth: number;
   originalHeight: number;
+  /** A buffered compact editor has an explicit capture identity rather than a project rail. */
+  surface?: 'quick-capture';
 }
 
 // Keep observing after the initial wait: a loading interval or a replacement
@@ -44,7 +46,7 @@ function canvasReadinessScript(expected?: SmokeScreenshotCanvas, required = fals
   // Rail test IDs also label text/drawing items. Only an annotation canvas
   // establishes a screenshot for inferred calls; explicit requirements also
   // retain the selected screenshot identity across an initial canvas gap.
-  const selectedTestId = expected ? 'screenshot-' + expected.id : capture &&
+  const selectedTestId = expected?.surface === 'quick-capture' ? null : expected ? 'screenshot-' + expected.id : capture &&
     (${required} || document.querySelectorAll('[data-testid="annotation-canvas"]').length)
     ? document.querySelector('.shot-item.active [data-testid^="screenshot-"]')?.getAttribute('data-testid')
     : null;
@@ -69,6 +71,7 @@ function canvasReadinessScript(expected?: SmokeScreenshotCanvas, required = fals
     if ((required || capturedCanvases?.length) && !canvases.length) return pending('missing-canvas');
     let ready = true;
     const invalidate = reason => { ready = false; pending(reason); };
+    if (expected?.surface === 'quick-capture' && document.querySelector('[data-quick-capture-editor]')?.getAttribute('data-quick-capture-editor') !== expected.id) invalidate('selection-changed');
     if (selectedTestId && !document.querySelector('.shot-item.active [data-testid="' + selectedTestId + '"]')) invalidate('selection-changed');
     if (capturedCanvases && canvases.length !== capturedCanvases.length) invalidate('stage-replaced');
     for (const [index, canvas] of canvases.entries()) {
@@ -548,6 +551,10 @@ export class NativeUiDriver {
 
   async press(keyCode: string, modifiers: Electron.InputEvent['modifiers'] = []): Promise<void> {
     this.window.webContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
+    // Chromium activates native buttons on Enter's character event. keyDown alone
+    // exercises explicit key handlers, but not the browser's default activation.
+    if (/^(?:enter|return)$/i.test(keyCode))
+      this.window.webContents.sendInputEvent({ type: 'char', keyCode: '\r', modifiers });
     this.window.webContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
     await wait(40);
   }

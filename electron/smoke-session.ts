@@ -46,7 +46,10 @@ export async function runSmokeSession(host: SmokeSessionHost): Promise<number> {
   try {
     const requestedMode = process.env.IMNOTA_SMOKE_MODE;
     const mode =
-      requestedMode === 'stress' || requestedMode === 'clipboard' || requestedMode === 'faults'
+      requestedMode === 'stress' ||
+      requestedMode === 'clipboard' ||
+      requestedMode === 'faults' ||
+      requestedMode === 'quick-capture'
         ? requestedMode
         : 'smoke';
     if (faults) {
@@ -72,8 +75,10 @@ export async function runSmokeSession(host: SmokeSessionHost): Promise<number> {
           trayAvailable: host.trayAvailable,
           globalCaptureShortcutRegistered: host.globalCaptureShortcutRegistered,
           readProject: host.readProject,
+          listCaptureWindows: host.listCaptureWindows,
           restoreRecovery: host.restoreRecovery,
           readSettings: host.readSettings,
+          quickCaptures: host.quickCaptures,
           async approveNextBackupRestore(projectPath) {
             host.approveBackupRestore(await fixtureProject(projectPath, 'restore'));
           },

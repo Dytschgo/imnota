@@ -24,6 +24,10 @@ import {
 import { PersistenceDiagnostics, tracesPersistenceChannel } from './persistence-diagnostics.js';
 import { inspectProjectFiles } from './project-integrity.js';
 import { captureTrayTemplate } from './app-tray.js';
+import { QuickCaptureWindow } from './quick-capture-window.js';
+import { guardPendingCaptureQuit } from './quick-capture-quit.js';
+import { commitQuickCapture } from './quick-capture-commit.js';
+import { listWorkspaceProjects } from './project-list.js';
 import {
   onboardingHandoffRoot,
   OnboardingHandoffWorkflow,
@@ -41,6 +45,7 @@ const { autoUpdater } = updater;
 import type {
   ImagePayload,
   ProjectData,
+  Annotation,
   ProjectSnapshot,
   ScreenshotRecord,
   WorkspaceSettings,
@@ -85,6 +90,7 @@ import { normalizeRecoveredProject } from './recovery.js';
 import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
 import { UpdateController, UpdateFailure } from './update-controller.js';
 import { discoverRelease, type ReleaseCandidate } from './releases.js';
+import { createCiReleaseMetadataRequest } from './release-metadata-request.js';
 import { prepareNativeUpdate } from './native-update.js';
 import { terminalUpdateArguments } from './terminal-update.js';
 import { startMacUpdate, type MacUpdateSession } from './macos-update.js';
@@ -140,6 +146,9 @@ import type {
 import { CAPTURE_OVERLAY_MODES, MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS } from '../src/shared/capture.js';
 import { LastCaptureRegionMemory, lastCaptureRegionForDisplay } from './last-capture-region.js';
 import { identifiableCaptureWindows, type CaptureWindowCandidate } from './capture-windows.js';
+import type { CaptureSourceDetails } from './capture-source.js';
+import { sourceWindowFixtureTitle } from './source-window-fixture.js';
+import { createScreenshotSource, type ScreenshotSource } from '../src/shared/source-context.js';
 import { tryListWindowsCaptureWindows } from './windows-capture-windows.js';
 import { NativeWorkflowError } from './workflow-errors.js';
 import {
@@ -176,6 +185,8 @@ import { requiresSingleInstanceLock } from './single-instance.js';
 import { AGENT_ACCESS_OFF_MESSAGE, AGENT_ACCESS_PORT_IN_USE_MESSAGE } from './agent-access-messages.js';
 import type { DamagedJournalReport } from './journal-quarantine.js';
 import type { IpcMainInvokeEvent } from 'electron';
+
+const releaseMetadataRequest = createCiReleaseMetadataRequest();
 
 let mcpProfile: string | undefined;
 let mcpVerificationWindows = 0;
@@ -235,6 +246,7 @@ if (!primaryInstance) {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
+let quickCaptureAccess: QuickCaptureWindow | undefined;
 let startupWindowCreated = false;
 // Main-process-only, one-use approval for the disposable native smoke fixture.
 let smokeBackupRestorePath: string | null = null;
@@ -347,6 +359,9 @@ function createAppTray(): void {
           else raiseMainWindow();
         },
         onQuit: () => app.quit(),
+        onPendingCaptures: () => {
+          void quickCaptureAccess?.show(true).catch(console.error);
+        },
       }),
     ),
   );
@@ -957,6 +972,13 @@ async function readScreenshotFiles(projectPath: string, screenshot: ScreenshotRe
   };
 }
 
+/** Source info is recorded only while the user's setting is on; nothing leaves the device. */
+function recordedSource(source: () => ScreenshotSource): ScreenshotSource | undefined {
+  return preferenceSettingsResult.settings.promptExport.includeSourceContext ? source() : undefined;
+}
+
+const withSource = (source: ScreenshotSource | undefined) => (source ? { source } : {});
+
 async function importOne(
   projectPath: string,
   sourcePath: string,
@@ -969,6 +991,7 @@ async function importOne(
     sourcePath,
     originalFilename,
     collectionId,
+    recordedSource(() => createScreenshotSource({ via: 'import', now: new Date() })),
   );
 }
 
@@ -1245,15 +1268,25 @@ function macCaptureHelperLocation(): MacCaptureHelperLocation {
 async function listIdentifiableCaptureWindows(
   displays: readonly CaptureDisplay[],
 ): Promise<CaptureWindowCandidate[]> {
-  if (process.env.IMNOTA_SMOKE_CAPTURE_SOURCE === 'synthetic') return [];
+  const synthetic = process.env.IMNOTA_SMOKE_CAPTURE_SOURCE === 'synthetic';
+  const fixtureTitle = sourceWindowFixtureTitle();
+  if (synthetic && !fixtureTitle) return [];
   // macOS lists windows through a bundled read-only WindowServer helper; a failure
   // leaves Area and Display available and Window mode explains it cannot identify windows.
-  if (process.platform === 'darwin')
-    return listMacCaptureWindows(macCaptureHelperLocation(), process.pid, displays).catch(() => []);
-  return identifiableCaptureWindows(
-    tryListWindowsCaptureWindows((rect) => screen.screenToDipRect(null, rect)),
-    displays,
-  );
+  const windows =
+    process.platform === 'darwin'
+      ? await listMacCaptureWindows(macCaptureHelperLocation(), process.pid, displays).catch(
+          (error: unknown) => {
+            // A synthetic fixture must expose provider failures instead of looking like an absent window.
+            if (fixtureTitle) throw error;
+            return [];
+          },
+        )
+      : identifiableCaptureWindows(
+          tryListWindowsCaptureWindows((rect) => screen.screenToDipRect(null, rect)),
+          displays,
+        );
+  return synthetic ? windows.filter((window) => window.title === fixtureTitle) : windows;
 }
 
 async function chooseCaptureRegion(
@@ -1318,6 +1351,7 @@ async function chooseCaptureRegion(
           imageDataUrl: `data:image/png;base64,${capture.png.toString('base64')}`,
           lastRegion: lastCaptureRegionForDisplay(remembered, capture.display),
           lastRegionAvailable: remembered !== null,
+          quickAccess: quickCaptureAccess?.enabled ?? false,
         });
       });
       overlays.push({ window, capture, ready: false });
@@ -1375,6 +1409,9 @@ async function insertCapturedPng(
   collectionId: string,
   png: Buffer,
   assertAdmission: () => void,
+  sourceDetails: CaptureSourceDetails = {},
+  capturedAt = new Date(),
+  quickCapture?: { id: string; annotations: Annotation[]; source?: ScreenshotSource },
 ): Promise<{
   snapshot: ProjectSnapshot;
   screenshotId: string;
@@ -1428,7 +1465,7 @@ async function insertCapturedPng(
   const timestamp = nextProjectMutationTimestamp(project.updatedAt);
   const screenshot: ScreenshotRecord = {
     collectionId: collection.id,
-    id: `shot_${crypto.randomUUID()}`,
+    id: quickCapture?.id ?? `shot_${crypto.randomUUID()}`,
     originalFilename: 'Screen capture.png',
     storedFilename,
     title: 'Screen capture',
@@ -1442,6 +1479,11 @@ async function insertCapturedPng(
     originalWidth: dimensions.width,
     originalHeight: dimensions.height,
     includeInExport: true,
+    ...withSource(
+      quickCapture
+        ? quickCapture.source
+        : recordedSource(() => createScreenshotSource({ via: 'capture', now: capturedAt, ...sourceDetails })),
+    ),
   };
   project.screenshots.push(screenshot);
   collection.archived = false;
@@ -1463,7 +1505,7 @@ async function insertCapturedPng(
       },
       {
         relativePath: screenshot.annotationFile,
-        after: Buffer.from('[]'),
+        after: Buffer.from(JSON.stringify(quickCapture?.annotations ?? [])),
         expectedBefore: screenshotTransactionBaseline(null),
       },
       {
@@ -1584,6 +1626,7 @@ function createIpcHost() {
     diagnostics,
     importOne,
     insertCapturedPng,
+    recordedSource,
     lastCaptureRegionMemory,
     listIdentifiableCaptureWindows,
     loadImage,
@@ -1636,6 +1679,9 @@ function createIpcHost() {
     },
     get pendingCapturePng() {
       return pendingCapturePng;
+    },
+    get quickCaptureAccess() {
+      return quickCaptureAccess;
     },
     set pendingCapturePng(value: typeof pendingCapturePng) {
       pendingCapturePng = value;
@@ -1914,6 +1960,51 @@ function registerIpc(): void {
       smokeFaultController?.receive(value);
     });
   const host = createIpcHost();
+  quickCaptureAccess = new QuickCaptureWindow({
+    preload: path.join(__dirname, 'quick-capture-preload.cjs'),
+    html: path.join(__dirname, '../../dist/quick-capture.html'),
+    temporaryDirectory: process.env.IMNOTA_SMOKE === '1' ? app.getPath('userData') : app.getPath('temp'),
+    devUrl: process.env.VITE_DEV_SERVER_URL,
+    corner: () => preferenceSettingsResult.settings.capture.quickAccessCorner ?? 'off',
+    updatePending: () => updateInstallPending,
+    authorize: assertProjectPath,
+    destinations: async () => {
+      const workspace = settings.workspacePath;
+      if (!workspace) return [];
+      const projects = await listWorkspaceProjects(workspace);
+      if (settings.workspacePath !== workspace)
+        throw new Error('Workspace changed. Reopen Pending captures and choose a destination again.');
+      return projects
+        .filter((project) => project.status === 'active')
+        .flatMap((project) =>
+          project.collections
+            .filter((collection) => !collection.archived)
+            .map((collection) => ({
+              projectPath: project.projectPath,
+              collectionId: collection.id,
+              label: `${project.name} / ${collection.name || 'Untitled collection'}`,
+            })),
+        );
+    },
+    insert: (item, destination) =>
+      router.enqueue(async () => {
+        await commitQuickCapture(item, destination, {
+          authorize: assertProjectPath,
+          read: readProjectMetadata,
+          snapshot: makeSnapshot,
+          insert: (projectPath, collectionId, png, assertAdmission, content) =>
+            insertCapturedPng(projectPath, collectionId, png, assertAdmission, {}, new Date(), content),
+          assertAdmission: () => {
+            if (updateInstallPending) throw new Error('Imnota is preparing an update. Your capture is kept.');
+          },
+        });
+        await projectWatchManager?.notifyProjectChanged(
+          await assertProjectPath(destination.projectPath),
+          'A pending capture was added to this project.',
+        );
+      }),
+  });
+  quickCaptureAccess.registerIpc();
   const handleCaptureWorkflow = captureWorkflowRegistrar(router);
   registerCaptureIpc(router, handleCaptureWorkflow, host);
 
@@ -2079,7 +2170,7 @@ function configureAutoUpdates(): void {
     manual:
       Boolean(process.env.PORTABLE_EXECUTABLE_FILE) ||
       (process.platform === 'linux' && !process.env.APPIMAGE),
-    discover: (channel) => discoverRelease(channel, process.platform),
+    discover: (channel) => discoverRelease(channel, process.platform, releaseMetadataRequest),
     prepare: macHelper
       ? async (release) => {
           macRelease = null;
@@ -2097,6 +2188,7 @@ function configureAutoUpdates(): void {
               appPath: macAppPath(),
               appPid: process.pid,
               helperPath: path.join(app.getAppPath(), 'scripts/update-macos.sh'),
+              observerPath: path.join(process.resourcesPath, 'imnota-security-observer'),
               cachePath: app.getPath('temp'),
               currentVersion: app.getVersion(),
             },
@@ -2330,6 +2422,7 @@ app.whenReady().then(async () => {
         return smokeFaultController;
       },
       captureCapability: smokeDesktopCaptureCapability,
+      quickCaptures: () => quickCaptureAccess!,
       diagnosticsHealth: () => diagnostics.health(),
       setWorkspace(workspacePath) {
         settings = { ...settings, workspacePath };
@@ -2356,6 +2449,7 @@ app.whenReady().then(async () => {
         return captureGlobalShortcut.registeredAccelerator !== null;
       },
       readProject,
+      listCaptureWindows: listIdentifiableCaptureWindows,
       async restoreRecovery(projectPath) {
         return openWithRecovery(projectPath, 'restore');
       },
@@ -2381,6 +2475,27 @@ app.on('window-all-closed', () => {
   if (appTray) return;
   captureGlobalShortcut.clear();
   if (process.platform !== 'darwin') app.quit();
+});
+guardPendingCaptureQuit({
+  onBeforeQuit: (listener) => {
+    app.on('before-quit', listener);
+  },
+  access: () => quickCaptureAccess,
+  ask: async (count) =>
+    (
+      await dialog.showMessageBox({
+        type: 'question',
+        title: 'Pending captures',
+        message: `${count} pending capture(s) have not been added.`,
+        detail:
+          'Keep working to copy or add them. Discard and quit removes only these pending captures from memory.',
+        buttons: ['Keep working', 'Discard pending captures and quit'],
+        defaultId: 0,
+        cancelId: 0,
+      })
+    ).response === 1,
+  report: (message) => dialog.showErrorBox('Pending captures are kept', message),
+  quit: () => app.quit(),
 });
 onSuccessfulQuit(app, () => {
   appTray = teardownTrayAfterSuccessfulQuit({

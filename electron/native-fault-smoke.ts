@@ -371,8 +371,10 @@ async function restoreCase(
   if (!adoptionRefusal)
     requireThat(text.includes(COMMITTED_WRITE_WARNING), 'Restore omitted the complete durability warning.');
   if (success) {
+    // The real text fixture starts with "# Fixture owned"; list/status labels omit Markdown markers.
+    const restoredTitle = kind === 'text' ? 'Fixture owned' : record.title;
     requireThat(
-      text.includes(`Restored “${record.title}”.`),
+      text.includes(`Restored “${restoredTitle}”.`),
       'Restore status omitted the actual item title.',
     );
     requireThat(renderer.selectedItemId === item.id, 'Restored item was not selected.');

@@ -20,6 +20,20 @@ const snapshot: PromptCollectionInput = {
 };
 
 describe('prompt export snapshot identity', () => {
+  it('invalidates a saved plan when comparison membership or roles change', async () => {
+    const comparison = { kind: 'current-expected' as const, leftId: 'one', rightId: 'two' };
+    const plain = await fingerprintPromptExportSnapshot(snapshot);
+    const paired = await fingerprintPromptExportSnapshot({ ...snapshot, comparison });
+    const reversed = await fingerprintPromptExportSnapshot({
+      ...snapshot,
+      comparison: { ...comparison, leftId: 'two', rightId: 'one' },
+    });
+    const reviewed = await fingerprintPromptExportSnapshot({
+      ...snapshot,
+      comparison: { ...comparison, kind: 'before-after' },
+    });
+    expect(new Set([plain, paired, reversed, reviewed]).size).toBe(4);
+  });
   it('uses a versioned stable fingerprint for the same saved input', async () => {
     expect(PROMPT_EXPORT_SNAPSHOT_VERSION).toBe(3);
     await expect(fingerprintPromptExportSnapshot(snapshot)).resolves.toBe(
@@ -43,6 +57,28 @@ describe('prompt export snapshot identity', () => {
     });
 
     expect(new Set([original, changedText, changedInclusion, changedCollection]).size).toBe(4);
+  });
+
+  it('changes when a screenshot source is edited, so a stale export is not reused', async () => {
+    const shot = {
+      id: 'shot-a',
+      position: 0,
+      title: 'Shot',
+      originalFilename: 'a.png',
+      description: '',
+      priority: 'medium' as const,
+      includeInExport: true,
+      nativeWidth: 10,
+      nativeHeight: 10,
+      contentRevision: 'r1',
+      annotations: [],
+      source: { via: 'capture' as const, capturedAt: '2026-10-10T10:00:00.000Z', windowTitle: 'Before' },
+    };
+    const before = await fingerprintPromptExportSnapshot({ ...snapshot, screenshots: [shot], items: [shot] });
+    const edited = { ...shot, source: { ...shot.source, windowTitle: 'After' } };
+    await expect(
+      fingerprintPromptExportSnapshot({ ...snapshot, screenshots: [edited], items: [edited] }),
+    ).resolves.not.toBe(before);
   });
 
   it('preserves ordered mixed content as part of the snapshot identity', async () => {

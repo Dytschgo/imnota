@@ -1,6 +1,6 @@
 import { versionStaticHead } from './static-assets.js';
 import { sharePage } from './share-page.js';
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import express from 'express';
 import { rateLimit } from 'express-rate-limit';
 import fs from 'node:fs';
@@ -334,22 +334,30 @@ function shareReceipt(record, uploadToken, config, assets, recovered = false) {
   };
 }
 
-async function writeArchive(directory, images) {
+export async function writeArchive(directory, images) {
   const archivePath = path.join(directory, 'archive.zip');
-  await new Promise((resolve, reject) => {
-    const output = fs.createWriteStream(archivePath, { mode: 0o600 });
-    const archive = archiver('zip', { zlib: { level: 9 } });
-    output.once('close', () => resolve(undefined));
-    output.once('error', reject);
-    archive.once('warning', reject);
-    archive.once('error', reject);
-    archive.pipe(output);
-    archive.file(path.join(directory, 'prompt.md'), { name: 'prompt.md' });
-    for (const image of images) {
-      archive.file(path.join(directory, image.filename), { name: image.filename });
-    }
-    archive.finalize().catch(reject);
-  });
+  const output = fs.createWriteStream(archivePath, { mode: 0o600 });
+  const archive = new ZipArchive({ zlib: { level: 9 } });
+  try {
+    await new Promise((resolve, reject) => {
+      output.once('close', () => resolve(undefined));
+      output.once('error', reject);
+      archive.on('warning', reject);
+      archive.on('error', reject);
+      archive.pipe(output);
+      archive.file(path.join(directory, 'prompt.md'), { name: 'prompt.md' });
+      for (const image of images) {
+        archive.file(path.join(directory, image.filename), { name: image.filename });
+      }
+      archive.finalize().catch(reject);
+    });
+  } catch (error) {
+    archive.abort();
+    output.destroy();
+    if (!output.closed) await new Promise((resolve) => output.once('close', () => resolve(undefined)));
+    await fsp.rm(archivePath, { force: true });
+    throw error;
+  }
   return (await fsp.stat(archivePath)).size;
 }
 
