@@ -3,7 +3,7 @@ allowBuilds:
   electron-winstaller: false
   esbuild: true
 
-# Keep drawing-engine and Dependabot-failed transitive packages on patched releases.
+# Keep renderer and build-tool dependency branches on patched releases.
 overrides:
   'nanoid@<4': 3.3.18
   'nanoid@>=4 <5.1.16': 5.1.16
@@ -11,3 +11,9 @@ overrides:
   'source-map-js@<1.2.2': 1.2.2
   'shell-quote@>=1.8.4 <1.11.0': 1.11.0
   'katex@<0.18.2': 0.18.2
+  'fast-uri@>=3 <3.1.9': 3.1.9
+  'brace-expansion@>=2 <2.1.7': 2.1.7
+  'brace-expansion@>=4 <5.0.12': 5.0.12
+  'undici@>=6 <6.29.1': 6.29.1
+  'undici@>=7 <7.30.1': 7.30.1
+  'minimatch@>=7 <11.0.1': 11.0.8
