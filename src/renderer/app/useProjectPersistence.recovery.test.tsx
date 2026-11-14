@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, vi } from 'vitest';
 import type { IpcMainInvokeEvent } from 'electron';
 import type { ImnotaBridge, ProjectData, ProjectSnapshot, ScreenshotRecord } from '../../shared/types';
@@ -24,6 +24,7 @@ import { PersistenceDiagnostics } from '../../../electron/persistence-diagnostic
 import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
 import {
   persistenceSession,
+  persistenceLedger,
   trackWatch,
   persistenceFault,
   type PersistenceLedger,
@@ -42,6 +43,7 @@ afterEach(async (context) => {
   try {
     await session.cleanup(context);
   } finally {
+    cleanup();
     vi.restoreAllMocks();
     Object.defineProperty(process, 'platform', { value: platform });
     setReloadProtection(null);
@@ -269,6 +271,8 @@ async function buildFixture(
     });
     return { persistence, content };
   });
+  // Mounted renderers belong to the same lifetime as their native filesystem/watch fixtures.
+  ledger.stop(() => hook.unmount());
   await waitFor(() => {
     expect(hook.result.current.persistence.projectRevision).toBe(startRevision);
     expect(hook.result.current.persistence.loadedScreenshotId).toBe(shot.id);
@@ -869,3 +873,16 @@ it.each(['EIO', 'EACCES', 'EPERM'])(
     expect(f.current().externalChange?.message).toMatch(/reload.*compare/i);
   },
 );
+it('unsubscribes recovery listeners when their native fixture is disposed', async (context) => {
+  const owner = persistenceLedger();
+  try {
+    const f = await owner.span('fixture construction', () => buildFixture(owner, { keepMounted: true }));
+    expect(f.listeners.size).toBe(1);
+    await owner.cleanup(context.signal);
+    expect(f.listeners.size).toBe(0);
+    await expect(fs.stat(f.projectPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  } finally {
+    cleanup();
+    await owner.cleanup(context.signal);
+  }
+});
