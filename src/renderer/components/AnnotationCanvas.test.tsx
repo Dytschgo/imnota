@@ -796,3 +796,16 @@ test('a ctrl-wheel zoom queued before a pan move in the same frame is kept', () 
   f.pointer('pointerup', 620, 410);
   expect(viewportState(f.canvas)).toEqual(actual);
 });
+
+test('a search reveal queued before a pan frame centres the match in the stage', () => {
+  const frames = controlFrames();
+  const f = mountCanvas('select', [{ ...existingRectangle, x: 1800 }], existingRectangle.id);
+  expect(frames.pending()).not.toEqual([]);
+  f.pointer('pointerdown', 600, 400);
+  f.pointer('pointermove', 900, 550);
+  frames.run();
+  f.pointer('pointerup', 900, 550);
+  const rect = (f.stage.findOne(`#${existingRectangle.id}`) as Konva.Shape).getClientRect();
+  expect(rect.x + rect.width / 2).toBeCloseTo(f.stage.width() / 2);
+  expect(rect.y + rect.height / 2).toBeCloseTo(f.stage.height() / 2);
+});

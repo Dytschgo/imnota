@@ -580,19 +580,13 @@ export function AnnotationCanvas({
         if (attempts < 120) frame = requestAnimationFrame(reveal);
         return;
       }
-      const rect = node.getClientRect({ relativeTo: stage });
-      const current = viewportRef.current;
-      const next = viewportToReveal(
-        {
-          x: (rect.x - current.x) / current.scale,
-          y: (rect.y - current.y) / current.scale,
-          width: rect.width / current.scale,
-          height: rect.height / current.scale,
-        },
-        size,
-      );
+      // Measure in image coordinates, relative to the layer's view-transform group, so the bounds do not
+      // depend on whichever viewport was last drawn while newer pan or wheel input waits for its frame.
+      const layer = node.getLayer();
+      let view: Konva.Node = node;
+      while (view.getParent() && view.getParent() !== layer) view = view.getParent()!;
       revealedMatch.current = key;
-      commitViewport(next);
+      commitViewport(viewportToReveal(node.getClientRect({ relativeTo: view as Konva.Container }), size));
     };
     frame = requestAnimationFrame(reveal);
     return () => cancelAnimationFrame(frame);
