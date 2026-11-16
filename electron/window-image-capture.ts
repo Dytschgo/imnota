@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { CaptureRectangle } from '../src/shared/capture.js';
+import { hasPngSignature, PNG_SIGNATURE } from '../src/shared/png.js';
 
 /**
  * Window mode captures the chosen window's own pixels, so apps in front of it are not
@@ -10,13 +11,11 @@ import type { CaptureRectangle } from '../src/shared/capture.js';
  * cropping the frozen screen still, which is what the user saw while selecting.
  */
 
-const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const MAX_WINDOW_PNG_BYTES = 64 * 1024 * 1024;
 
 function pngOrNull(png: Buffer): Buffer | null {
-  return png.length > PNG_SIGNATURE.length &&
-    png.length <= MAX_WINDOW_PNG_BYTES &&
-    png.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)
+  // More than the signature alone, within the size cap; decoding happens later.
+  return png.length > PNG_SIGNATURE.length && png.length <= MAX_WINDOW_PNG_BYTES && hasPngSignature(png)
     ? png
     : null;
 }
