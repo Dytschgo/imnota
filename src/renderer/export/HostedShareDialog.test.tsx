@@ -41,6 +41,8 @@ afterEach(() => {
   useAppStore.setState({ settings: { ...useAppStore.getState().settings, sharingSenderName: undefined } });
 });
 
+const recoveryWarning = (message: string) => ({ id: `recovery:${'b'.repeat(64)}`, message });
+
 function bridge(overrides: Partial<ImnotaBridge> = {}) {
   const value = {
     planHostedShare: vi.fn<ImnotaBridge['planHostedShare']>(async () => ({
@@ -52,7 +54,7 @@ function bridge(overrides: Partial<ImnotaBridge> = {}) {
     })),
     listHostedShares: vi.fn<ImnotaBridge['listHostedShares']>(async () => ({
       ok: true as const,
-      value: { records: [], recoveryErrors: [] },
+      value: { records: [], recoveryWarnings: [] },
     })),
     createHostedShare: vi.fn(async () => ({ ok: true as const, value: active })),
     cancelHostedShare: vi.fn(async () => ({ ok: true as const, value: undefined })),
@@ -89,7 +91,7 @@ describe('HostedShareDialog', () => {
       bridge({
         listHostedShares: vi.fn(async () => ({
           ok: true as const,
-          value: { records: [active], recoveryErrors: [] },
+          value: { records: [active], recoveryWarnings: [] },
         })),
       });
       render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
@@ -252,7 +254,6 @@ describe('HostedShareDialog', () => {
         ok: true as const,
         value: {
           records: [active],
-          recoveryErrors: ['Earlier upload failed.'],
           recoveryWarnings: [{ id, message: 'Earlier upload failed.' }],
         },
       })),
@@ -361,7 +362,7 @@ describe('HostedShareDialog', () => {
         ok: true as const,
         value: {
           records: [active, expired, revoked],
-          recoveryErrors: ['A previous receipt timed out.'],
+          recoveryWarnings: [recoveryWarning('A previous receipt timed out.')],
         },
       })),
     });
@@ -384,9 +385,9 @@ describe('HostedShareDialog', () => {
       .fn<ImnotaBridge['listHostedShares']>()
       .mockResolvedValueOnce({
         ok: true,
-        value: { records: [], recoveryErrors: ['A previous receipt timed out.'] },
+        value: { records: [], recoveryWarnings: [recoveryWarning('A previous receipt timed out.')] },
       })
-      .mockResolvedValueOnce({ ok: true, value: { records: [active], recoveryErrors: [] } });
+      .mockResolvedValueOnce({ ok: true, value: { records: [active], recoveryWarnings: [] } });
     const native = bridge({ listHostedShares });
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
     await waitFor(() => expect(screen.queryByText('Checking share size…')).not.toBeInTheDocument());
@@ -406,7 +407,7 @@ describe('HostedShareDialog', () => {
     );
     const listHostedShares = vi
       .fn<ImnotaBridge['listHostedShares']>()
-      .mockResolvedValueOnce({ ok: true, value: { records: [], recoveryErrors: [] } })
+      .mockResolvedValueOnce({ ok: true, value: { records: [], recoveryWarnings: [] } })
       .mockImplementationOnce(() => refresh);
     bridge({ listHostedShares });
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
@@ -436,7 +437,7 @@ describe('HostedShareDialog', () => {
     const listHostedShares = vi
       .fn<ImnotaBridge['listHostedShares']>()
       .mockImplementationOnce(() => initial)
-      .mockResolvedValueOnce({ ok: true, value: { records: [active], recoveryErrors: [] } });
+      .mockResolvedValueOnce({ ok: true, value: { records: [active], recoveryWarnings: [] } });
     bridge({ listHostedShares });
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
     await waitFor(() => expect(screen.queryByText('Checking share size…')).not.toBeInTheDocument());
@@ -446,7 +447,7 @@ describe('HostedShareDialog', () => {
     await waitFor(() => expect(listHostedShares).toHaveBeenCalledTimes(2));
     resolveInitial({
       ok: true,
-      value: { records: [expired], recoveryErrors: ['A stale recovery warning.'] },
+      value: { records: [expired], recoveryWarnings: [recoveryWarning('A stale recovery warning.')] },
     });
     await waitFor(() => expect(screen.getByText('Your shared links (1)')).toBeInTheDocument());
     expect(screen.queryByText('A stale recovery warning.')).not.toBeInTheDocument();
@@ -464,7 +465,7 @@ describe('HostedShareDialog', () => {
       })),
       listHostedShares: vi.fn<ImnotaBridge['listHostedShares']>(async () => ({
         ok: true as const,
-        value: { records: [active], recoveryErrors: ['A previous receipt timed out.'] },
+        value: { records: [active], recoveryWarnings: [recoveryWarning('A previous receipt timed out.')] },
       })),
     });
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
@@ -472,7 +473,10 @@ describe('HostedShareDialog', () => {
     await screen.findByText('A previous receipt timed out.');
 
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
-    expect(screen.queryByText('A previous receipt timed out.')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('A previous receipt timed out.')).not.toBeInTheDocument());
+    expect(native.dismissHostedShareRecoveryWarning).toHaveBeenCalledWith({
+      id: recoveryWarning('').id,
+    });
     expect(screen.getByText('Your shared links (1)')).toBeInTheDocument();
     expect(native.cancelHostedShare).not.toHaveBeenCalled();
     expect(native.revokeHostedShare).not.toHaveBeenCalled();
@@ -487,7 +491,7 @@ describe('HostedShareDialog', () => {
       .fn<ImnotaBridge['listHostedShares']>()
       .mockResolvedValueOnce({
         ok: true,
-        value: { records: [active], recoveryErrors: ['A previous receipt timed out.'] },
+        value: { records: [active], recoveryWarnings: [recoveryWarning('A previous receipt timed out.')] },
       })
       .mockImplementationOnce(() => retry);
     bridge({ listHostedShares });
@@ -555,7 +559,7 @@ describe('HostedShareDialog', () => {
       })),
       listHostedShares: vi.fn<ImnotaBridge['listHostedShares']>(async () => ({
         ok: true as const,
-        value: { records: [active], recoveryErrors: [] },
+        value: { records: [active], recoveryWarnings: [] },
       })),
       revokeHostedShare,
     });
@@ -617,7 +621,7 @@ it('keeps completed parts and retries an ambiguous second upload with the exact 
     createHostedShare: create,
     listHostedShares: vi.fn<ImnotaBridge['listHostedShares']>(async () => ({
       ok: true,
-      value: { records: create.mock.calls.length ? [active] : [], recoveryErrors: [] },
+      value: { records: create.mock.calls.length ? [active] : [], recoveryWarnings: [] },
     })),
   });
   render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);

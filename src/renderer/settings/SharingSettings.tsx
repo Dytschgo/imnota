@@ -20,7 +20,6 @@ export function SharingSettings() {
   const name = useSharingSenderName();
   const [records, setRecords] = useState<readonly HostedShareRecord[]>([]);
   const [recoveryWarnings, setRecoveryWarnings] = useState<readonly HostedShareRecoveryWarning[]>([]);
-  const [legacyRecoveryErrors, setLegacyRecoveryErrors] = useState<readonly string[]>([]);
   const [loading, setLoading] = useState(true);
   const [historyError, setHistoryError] = useState('');
   const [busyWarning, setBusyWarning] = useState<string>();
@@ -56,8 +55,7 @@ export function SharingSettings() {
       return;
     }
     setRecords(result.value.records);
-    setRecoveryWarnings(result.value.recoveryWarnings ?? []);
-    setLegacyRecoveryErrors(result.value.recoveryWarnings === undefined ? result.value.recoveryErrors : []);
+    setRecoveryWarnings(result.value.recoveryWarnings);
   }, []);
 
   useEffect(() => {
@@ -193,7 +191,7 @@ export function SharingSettings() {
           </Button>
         </header>
 
-        {(recoveryWarnings.length > 0 || legacyRecoveryErrors.length > 0) && (
+        {recoveryWarnings.length > 0 && (
           <div className="sharing-recovery" role="alert">
             <AlertTriangle size={16} aria-hidden="true" />
             <div>
@@ -210,9 +208,6 @@ export function SharingSettings() {
                     Dismiss
                   </Button>
                 </div>
-              ))}
-              {legacyRecoveryErrors.map((message) => (
-                <p key={message}>{message}</p>
               ))}
               <Button variant="ghost" disabled={loading || mutationBusy} onClick={() => void refresh()}>
                 Retry recovery

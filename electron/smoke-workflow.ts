@@ -2839,21 +2839,22 @@ async function exerciseWatchAndConflict(
   })`);
 }
 
-async function exerciseRecovery(
-  driver: NativeUiDriver,
-  host: SmokeWorkflowHost,
-  projectPath: string,
-): Promise<void> {
-  await driver.evaluate(`(async () => {
-    const snapshot = await window.imnota.loadProject(${JSON.stringify(projectPath)});
-    const recovered = structuredClone(snapshot.project);
-    recovered.screenshots[0].title = 'Recovered native title';
-    recovered.screenshots[0].description = 'Recovered native description';
-    recovered.screenshots[0].priority = 'high';
-    recovered.screenshots[0].includeInExport = false;
-    await window.imnota.saveRecovery({ projectPath: snapshot.projectPath, project: recovered, annotations: {} });
-  })()`);
+async function exerciseRecovery(host: SmokeWorkflowHost, projectPath: string): Promise<void> {
   const before = await host.readProject(projectPath);
+  // Current builds never write this journal; simulate one left behind by an older version.
+  const recoveredProject = structuredClone(before);
+  recoveredProject.screenshots[0].title = 'Recovered native title';
+  recoveredProject.screenshots[0].description = 'Recovered native description';
+  recoveredProject.screenshots[0].priority = 'high';
+  recoveredProject.screenshots[0].includeInExport = false;
+  await fs.writeFile(
+    path.join(projectPath, '.imnota-recovery.json'),
+    JSON.stringify(
+      { savedAt: new Date().toISOString(), project: recoveredProject, annotations: {} },
+      null,
+      2,
+    ),
+  );
   const original = path.join(
     projectPath,
     'collections',
@@ -3516,7 +3517,7 @@ export async function runSmokeWorkflow(
   assertions.push(
     'metadata screenshot omission rejected without changing original/metadata bytes, with correlated CAS diagnostic reference',
   );
-  await exerciseRecovery(driver, host, projectPath);
+  await exerciseRecovery(host, projectPath);
   assertions.push(
     'interrupted-edit recovery metadata and missing-original warning with retained screenshot record',
   );

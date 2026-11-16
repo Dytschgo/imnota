@@ -635,7 +635,6 @@ const projectPathCalls: Record<string, (projectPath: string) => unknown[]> = {
   'projects:recently-deleted': (projectPath) => [projectPath],
   'projects:save': (projectPath) => [projectPath, projectData()],
   'projects:duplicate': (projectPath) => [projectPath],
-  'projects:archive': (projectPath) => [projectPath],
   'projects:delete': (projectPath) => [projectPath],
   'collections:edit': (projectPath) => [{ projectPath, action: 'create' }],
   'projects:save-screenshot': (projectPath) => [
@@ -655,20 +654,6 @@ const projectPathCalls: Record<string, (projectPath: string) => unknown[]> = {
   'content:duplicate': (projectPath) => [{ projectPath, itemId: 'item_1' }],
   'content:delete': (projectPath) => [{ projectPath, itemId: 'item_1' }],
   'content:undo-delete': (projectPath) => [{ projectPath, undoToken: 'undo-token' }],
-  'exports:annotated-image': (projectPath) => [
-    { projectPath, filename: 'annotated.png', dataUrl: pngDataUrl },
-  ],
-  'exports:package': (projectPath) => [
-    {
-      projectPath,
-      markdown: '# Context',
-      annotatedImages: [{ filename: 'annotated.png', dataUrl: pngDataUrl }],
-      includeOriginal: true,
-      includeAnnotations: true,
-    },
-  ],
-  'recovery:save': (projectPath) => [{ projectPath, project: projectData(), annotations: {} }],
-  'recovery:clear': (projectPath) => [projectPath],
   'backups:create': (projectPath) => [{ projectPath }],
   'backups:restore': (projectPath) => [
     { snapshotId, mode: 'in-place', projectPath, confirmation: 'RESTORE' },
@@ -853,7 +838,6 @@ const invalidCases: Record<string, InvalidCase[]> = {
     ['projects:load', 'a second argument', [anyPath, anyPath]],
     ['projects:delete', 'an object instead of a path', [{ projectPath: anyPath }]],
     ['projects:duplicate', 'no argument', []],
-    ['projects:archive', 'a list of paths', [[anyPath]]],
     ['projects:save', 'a project that is not a project', [anyPath, { name: 'Project' }]],
     [
       'projects:update-metadata',
@@ -971,33 +955,6 @@ const invalidCases: Record<string, InvalidCase[]> = {
     ...withNames('content:undo-delete', 'undoToken', (undoToken) => [{ projectPath: anyPath, undoToken }]),
   ],
   'ipc-system.ts': [
-    ...withNames('exports:annotated-image', 'filename', (filename) => [
-      { projectPath: anyPath, filename, dataUrl: pngDataUrl },
-    ]),
-    ...withNames('exports:annotated-image', 'collectionId', (collectionId) => [
-      { projectPath: anyPath, filename: 'a.png', dataUrl: pngDataUrl, collectionId },
-    ]),
-    [
-      'exports:annotated-image',
-      'a file URL instead of image data',
-      [{ projectPath: anyPath, filename: 'a.png', dataUrl: 'file:///etc/passwd' }],
-    ],
-    ...withNames('exports:package', 'image filename', (filename) =>
-      call('exports:package', (input) => (input.annotatedImages = [{ filename, dataUrl: pngDataUrl }])),
-    ),
-    [
-      'exports:package',
-      'oversized markdown',
-      call('exports:package', (input) => (input.markdown = long(2_000_001))),
-    ],
-    [
-      'exports:package',
-      'too many images',
-      call(
-        'exports:package',
-        (input) => (input.annotatedImages = Array(1001).fill({ filename: 'a.png', dataUrl: pngDataUrl })),
-      ),
-    ],
     ['system:open-path', 'an oversized path', [long(2001)]],
     ['system:open-path', 'an empty path', ['']],
     ['system:copy-text', 'oversized text', [long(2_000_001)]],
@@ -1022,11 +979,6 @@ const invalidCases: Record<string, InvalidCase[]> = {
     ],
     ['onboarding:copy-handoff', 'a session id that is a path', [{ sessionId: '../session', action: 'rich' }]],
     ['onboarding:open-handoff', 'an unknown target', [{ sessionId, target: 'executable' }]],
-    [
-      'recovery:save',
-      'annotations that are not lists',
-      call('recovery:save', (input) => (input.annotations = { a: 'b' })),
-    ],
     ['update:install', 'an argument', ['https://example.com/update.exe']],
   ],
   'ipc-settings.ts': [

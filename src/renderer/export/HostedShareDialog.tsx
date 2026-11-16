@@ -70,7 +70,6 @@ export function HostedShareDialog({
   const [record, setRecord] = useState<HostedShareRecord>();
   const [request, setRequest] = useState<string>();
   const [history, setHistory] = useState<readonly HostedShareRecord[]>([]);
-  const [recoveryErrors, setRecoveryErrors] = useState<readonly string[]>([]);
   const [recoveryWarnings, setRecoveryWarnings] = useState<readonly HostedShareRecoveryWarning[]>([]);
   const [revokeTarget, setRevokeTarget] = useState<HostedShareRecord>();
   const mounted = useRef(true);
@@ -92,8 +91,7 @@ export function HostedShareDialog({
     if (!mounted.current || request !== historyRequest.current) return false;
     if (result.ok) {
       setHistory(result.value.records);
-      setRecoveryErrors(result.value.recoveryErrors);
-      setRecoveryWarnings(result.value.recoveryWarnings ?? []);
+      setRecoveryWarnings(result.value.recoveryWarnings);
       return true;
     }
     if (reportError) setError(result.error.message);
@@ -192,7 +190,6 @@ export function HostedShareDialog({
       }
       if (mounted.current) {
         setRecoveryWarnings([]);
-        setRecoveryErrors([]);
         setError(undefined);
       }
     } catch {
@@ -463,13 +460,13 @@ export function HostedShareDialog({
             {error}
           </p>
         )}
-        {recoveryErrors.length > 0 && (
+        {recoveryWarnings.length > 0 && (
           <div className="hosted-share-recovery-errors" role="alert">
             <AlertTriangle size={15} aria-hidden="true" />
             <div>
               <strong>An earlier share needs attention</strong>
-              {recoveryErrors.map((message) => (
-                <p key={message}>{message}</p>
+              {recoveryWarnings.map((warning) => (
+                <p key={warning.id}>{warning.message}</p>
               ))}
               <div className="hosted-share-actions">
                 <Button variant="ghost" disabled={busy} onClick={() => void retryRecovery()}>
