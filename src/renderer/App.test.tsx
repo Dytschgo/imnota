@@ -3835,6 +3835,156 @@ describe('feedback controls', () => {
     expect(await screen.findByText('Project moved to the system trash')).toBeInTheDocument();
   });
 
+  describe('project duplication', () => {
+    const source = { ...snapshot.project, projectPath: snapshot.projectPath };
+    const copy: ProjectSnapshot = {
+      ...snapshot,
+      projectPath: '/workspace/project-copy',
+      projectRevision: 'copy-1',
+      project: { ...snapshot.project, id: 'project-copy-id', name: 'Project copy' },
+    };
+
+    it('duplicates an active project from its row and opens the copy', async () => {
+      let copied = false;
+      const listProjects = vi.fn(async () =>
+        copied ? [source, { ...copy.project, projectPath: copy.projectPath }] : [source],
+      );
+      const duplicateProject = vi.fn<ImnotaBridge['duplicateProject']>(async () => {
+        copied = true;
+        return copy;
+      });
+      renderApp({ listProjects, duplicateProject });
+      const duplicate = await screen.findByTestId('project-duplicate-project-id');
+      expect(duplicate).toHaveAccessibleName('Duplicate Project');
+      expect(duplicate).toHaveTextContent('');
+
+      fireEvent.click(duplicate);
+      await waitFor(() => expect(useAppStore.getState().snapshot?.projectPath).toBe(copy.projectPath));
+      expect(duplicateProject).toHaveBeenCalledExactlyOnceWith(snapshot.projectPath);
+      expect(useAppStore.getState().snapshot?.project.id).toBe('project-copy-id');
+      expect(useAppStore.getState().projects.map((project) => project.id)).toEqual([
+        'project-id',
+        'project-copy-id',
+      ]);
+      expect(await screen.findByText('Project duplicated')).toBeVisible();
+    });
+
+    it('shows the backend failure, including a retained folder, without claiming success', async () => {
+      const retained =
+        'Duplicate failed; incomplete files were retained at /workspace/Project copy for manual inspection: Duplicate cleanup path changed.';
+      renderApp({
+        listProjects: async () => [source],
+        duplicateProject: async () => {
+          throw new Error(`Error invoking remote method 'projects:duplicate': Error: ${retained}`);
+        },
+      });
+      fireEvent.click(await screen.findByTestId('project-duplicate-project-id'));
+
+      expect(await screen.findByText(retained)).toBeVisible();
+      expect(screen.queryByText('Project duplicated')).toBeNull();
+      expect(useAppStore.getState().snapshot).toBeNull();
+      expect(screen.getByTestId('project-duplicate-project-id')).toBeEnabled();
+    });
+
+    it('disables Duplicate on every row while one duplicate is in progress', async () => {
+      let rejectDuplicate!: (reason: Error) => void;
+      const duplicateProject = vi.fn(
+        () =>
+          new Promise<ProjectSnapshot>((_resolve, reject) => {
+            rejectDuplicate = reject;
+          }),
+      );
+      renderApp({
+        listProjects: async () => [
+          source,
+          { ...source, id: 'other-id', projectPath: '/workspace/other', name: 'Other' },
+        ],
+        duplicateProject,
+      });
+      const first = await screen.findByTestId('project-duplicate-project-id');
+      fireEvent.click(first);
+      await waitFor(() => expect(first).toBeDisabled());
+      expect(first).toHaveAttribute('aria-busy', 'true');
+      expect(screen.getByTestId('project-duplicate-other-id')).toBeDisabled();
+      fireEvent.click(first);
+      fireEvent.click(screen.getByTestId('project-duplicate-other-id'));
+      expect(duplicateProject).toHaveBeenCalledOnce();
+
+      await act(async () => rejectDuplicate(new Error('Disk full.')));
+      expect(await screen.findByText('Disk full.')).toBeVisible();
+      expect(first).toBeEnabled();
+      expect(first).not.toHaveAttribute('aria-busy');
+    });
+
+    it('still reports a retained-folder failure after the user navigates away', async () => {
+      const retained =
+        'Duplicate failed; incomplete files were retained at /workspace/Project copy for manual inspection: Copy interrupted.';
+      let rejectDuplicate!: (reason: Error) => void;
+      renderApp({
+        listProjects: async () => [source],
+        duplicateProject: () =>
+          new Promise<ProjectSnapshot>((_resolve, reject) => {
+            rejectDuplicate = reject;
+          }),
+      });
+      const duplicate = await screen.findByTestId('project-duplicate-project-id');
+      fireEvent.click(duplicate);
+      await waitFor(() => expect(duplicate).toBeDisabled());
+      fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+      await waitFor(() => expect(useAppStore.getState().view).toBe('settings'));
+
+      await act(async () => rejectDuplicate(new Error(retained)));
+      expect(await screen.findByText(retained)).toBeVisible();
+      expect(screen.queryByText('Project duplicated')).toBeNull();
+    });
+
+    it('records the opened copy in history before refreshing the list', async () => {
+      let copied = false;
+      let releaseRefresh!: () => void;
+      const listProjects = vi.fn(async () => {
+        if (!copied) return [source];
+        await new Promise<void>((resolve) => {
+          releaseRefresh = resolve;
+        });
+        return [source, { ...copy.project, projectPath: copy.projectPath }];
+      });
+      const loadProject = vi.fn<ImnotaBridge['loadProject']>(async (projectPath) =>
+        projectPath === copy.projectPath ? copy : snapshot,
+      );
+      renderApp({
+        listProjects,
+        loadProject,
+        duplicateProject: async () => {
+          copied = true;
+          return copy;
+        },
+      });
+      fireEvent.click(await screen.findByTestId('project-duplicate-project-id'));
+      await waitFor(() => expect(useAppStore.getState().snapshot?.projectPath).toBe(copy.projectPath));
+      await waitFor(() => expect(releaseRefresh).toBeTypeOf('function'));
+      fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+      await waitFor(() => expect(useAppStore.getState().view).toBe('settings'));
+      await act(async () => releaseRefresh());
+      expect(await screen.findByText('Project duplicated')).toBeVisible();
+
+      // Back returns to the opened copy, not to the Library the duplicate started from.
+      fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+      await waitFor(() => expect(useAppStore.getState().view).toBe('workspace'));
+      expect(useAppStore.getState().snapshot?.projectPath).toBe(copy.projectPath);
+    });
+
+    it('does not offer Duplicate for archived projects', async () => {
+      renderApp({ listProjects: async () => [{ ...source, status: 'archived' as const }] });
+      fireEvent.click(
+        within(await screen.findByRole('group', { name: 'Show projects' })).getByRole('button', {
+          name: 'Archived',
+        }),
+      );
+      expect(await screen.findByTestId('project-restore-project-id')).toBeInTheDocument();
+      expect(screen.queryByTestId('project-duplicate-project-id')).toBeNull();
+    });
+  });
+
   it('keeps a newer project open when deletion of the previous project finishes later', async () => {
     let resolveDelete!: () => void;
     let deleted = false;

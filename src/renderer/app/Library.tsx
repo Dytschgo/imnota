@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, FolderOpen, Heart, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, Copy, FolderOpen, Heart, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import type { ContentSearchResult } from '../../shared/content-search';
 import { collectionDisplayName } from '../collection/collection-display-name';
 import { ProjectIcon } from '../components/ProjectIcon';
@@ -16,6 +16,8 @@ export function Library({
   onEdit,
   onArchive,
   onRestore,
+  onDuplicate,
+  duplicatingProjectPath = null,
   onDelete,
   onSearch,
   onBrowseProjects,
@@ -29,6 +31,10 @@ export function Library({
   onEdit(projectPath: string): void;
   onArchive(projectPath: string): void;
   onRestore(projectPath: string): void;
+  /** Copies an active project; archived projects are restored first, so the action is not offered. */
+  onDuplicate(projectPath: string): void;
+  /** The project being duplicated; every Duplicate action is disabled until it settles. */
+  duplicatingProjectPath?: string | null;
   onDelete(projectPath: string): void;
   onSearch(): void | Promise<void>;
   onBrowseProjects(): void | Promise<void>;
@@ -253,13 +259,24 @@ export function Library({
                         <ArchiveRestore size={15} aria-hidden="true" />
                       </IconButton>
                     ) : (
-                      <IconButton
-                        data-testid={`project-archive-${project.id}`}
-                        label={`Archive ${project.name}`}
-                        onClick={() => onArchive(project.projectPath)}
-                      >
-                        <Archive size={15} aria-hidden="true" />
-                      </IconButton>
+                      <>
+                        <IconButton
+                          data-testid={`project-duplicate-${project.id}`}
+                          label={`Duplicate ${project.name}`}
+                          disabled={duplicatingProjectPath !== null}
+                          aria-busy={duplicatingProjectPath === project.projectPath || undefined}
+                          onClick={() => onDuplicate(project.projectPath)}
+                        >
+                          <Copy size={15} aria-hidden="true" />
+                        </IconButton>
+                        <IconButton
+                          data-testid={`project-archive-${project.id}`}
+                          label={`Archive ${project.name}`}
+                          onClick={() => onArchive(project.projectPath)}
+                        >
+                          <Archive size={15} aria-hidden="true" />
+                        </IconButton>
+                      </>
                     )}
                     <IconButton
                       data-testid={`project-delete-${project.id}`}
