@@ -286,5 +286,11 @@ async function buildFixture(
 }
 
 export const kinds = ['screenshot', 'text', 'drawing'] as const;
-const codes = ['EIO', 'EACCES', 'EPERM'];
-export const cases = kinds.flatMap((kind) => codes.map((code) => ({ kind, code })));
+// EIO, EACCES and EPERM take the same directory-sync failure path in electron/files.ts, and
+// no Restore assertion depends on the code. Pair one code with each kind so every code and
+// every kind stays exercised without repeating each scenario once per code.
+const codeByKind = { screenshot: 'EIO', text: 'EACCES', drawing: 'EPERM' } as const satisfies Record<
+  (typeof kinds)[number],
+  string
+>;
+export const cases = kinds.map((kind) => ({ kind, code: codeByKind[kind] }));
