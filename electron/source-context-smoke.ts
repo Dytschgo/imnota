@@ -54,19 +54,24 @@ export async function exerciseSourceContext(
     await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
     await driver.click({ selector: '.project-row-main', text: 'Source context verification', exact: false });
   };
+  // Each poll builds a full project snapshot over IPC, so poll at a fixed interval rather than
+  // every frame, and keep the inner deadline inside the driver timeout so its message surfaces.
   const waitForSource = async (condition: string) => {
-    await driver.evaluate(`new Promise((resolve,reject) => {
+    await driver.evaluate(
+      `new Promise((resolve,reject) => {
       const deadline=Date.now()+15000;
       const check=async()=>{
         try {
           const snapshot=await window.imnota.loadProject(${json(projectPath)});
           const source=snapshot.project.screenshots.at(-1).source;
           if(${condition}) return resolve(true);
-          if(Date.now()>deadline) return reject(new Error('Source persistence did not reach expected state'));
-          requestAnimationFrame(check);
+          if(Date.now()>deadline) return reject(new Error('Source persistence did not reach expected state; last source: '+JSON.stringify(source ?? null)));
+          setTimeout(check, 100);
         } catch(error) { reject(error); }
       }; check();
-    })`);
+    })`,
+      25_000,
+    );
   };
   const markdown = async () => {
     await driver.click({ selector: '[data-testid="share-prompt-bundles"]' });

@@ -8,6 +8,7 @@ import {
   settingsPatchSchema,
 } from '../src/shared/schema.js';
 import { MAX_CLIPBOARD_PNG_LENGTH } from '../src/shared/clipboard-context.js';
+import { isPngDataUrl } from './png-data-url.js';
 import {
   createBackupInputSchema,
   inspectBackupInputSchema,
@@ -26,10 +27,25 @@ export const pathInput = z.string().min(1).max(2000);
 export const workflowPromptMarkdownInput = z.tuple([z.string()]);
 
 export const screenshotInput = z.object({ projectPath: pathInput, screenshot: screenshotSchema });
-export const png = z
-  .string()
-  .max(100_000_000)
-  .regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/);
+const PNG_INPUT_MAX_LENGTH = 100_000_000;
+
+/**
+ * A base64 PNG data URL within every length limit, checked in order. `.pipe` runs the
+ * decoder only after all of them pass, so an oversized string reports the same length
+ * issues as `z.string().max(...)` alone and is never decoded.
+ */
+export function pngDataUrlInput(...maxLengths: [number, ...number[]]) {
+  const maxLength = Math.min(...maxLengths);
+  return maxLengths
+    .reduce((schema, limit) => schema.max(limit), z.string())
+    .pipe(
+      z.string().refine((value) => isPngDataUrl(value, maxLength), {
+        message: 'Expected a base64 PNG data URL.',
+      }),
+    );
+}
+export const png = pngDataUrlInput(PNG_INPUT_MAX_LENGTH);
+const clipboardPng = pngDataUrlInput(PNG_INPUT_MAX_LENGTH, MAX_CLIPBOARD_PNG_LENGTH);
 export const contentImage = z
   .object({
     filename: filenameSchema,
@@ -202,9 +218,7 @@ export const contracts: Record<string, z.ZodType<unknown[]>> = {
   'content:undo-delete': z.tuple([z.object({ projectPath: pathInput, undoToken: filenameSchema }).strict()]),
   'system:copy-text': z.tuple([z.string().max(2_000_000)]),
   'system:copy-context': z.tuple([
-    z
-      .object({ markdown: z.string().max(2_000_000), imageDataUrl: png.max(MAX_CLIPBOARD_PNG_LENGTH) })
-      .strict(),
+    z.object({ markdown: z.string().max(2_000_000), imageDataUrl: clipboardPng }).strict(),
   ]),
   'system:copy-image': z.tuple([png]),
   'system:open-path': singlePath,
@@ -212,7 +226,7 @@ export const contracts: Record<string, z.ZodType<unknown[]>> = {
     z
       .object({
         markdown: z.string().min(1).max(2_000_000),
-        imageDataUrl: png.max(MAX_CLIPBOARD_PNG_LENGTH),
+        imageDataUrl: clipboardPng,
         markdownFilename: z.literal('component-search.md'),
         pngFilename: z.literal('component-search.png'),
       })

@@ -27,5 +27,8 @@ Additional archived records:
 
 - [October 31 VM reproducer](nightly-vm-reproducer-20261031.md): pinned historical installer verification, its partial Node 22 result, and where to find the removed reproducer in Git history.
 - [Feature verification](next-features-verification.md): September feature integration and 0.2.7 checks; its capture defaults and feature limits are historical.
+- [UI overhaul implementation](ui-overhaul/implementation.md) and its concept images: September desktop and hosted-service design delivery record, moved from `docs/ui-overhaul/`.
+- [UI feedback screenshots](ui-feedback/): visual evidence referenced by the September UI improvement record, moved from `docs/ui-feedback/`.
+- [Collections and simple screenshot context](subfolders-simple-context.md): earlier summary of the collection workflow; the [user guide](../user-guide.md) is current.
 - [Electron cache experiment](build-cache-experiment.md): completed PR #42 measurements and the decision to remove the experimental caches.
 - [Recovery unification plan](recovery-unification-plan.md): early proposal superseded by the [September 26 design](../recovery-unification-design.md); saves already share a journal, while delete/Undo consolidation remains a proposal.

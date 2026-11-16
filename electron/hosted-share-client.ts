@@ -9,6 +9,7 @@ import type {
   HostedShareUpload,
 } from '../src/shared/workflow-bridge.js';
 import { NativeWorkflowError } from './workflow-errors.js';
+import { hasPngSignature } from '../src/shared/png.js';
 
 const PRODUCTION_ORIGIN = 'https://app.imnota.xyz';
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
@@ -22,7 +23,6 @@ const MAX_MARKDOWN_BYTES = HOSTED_MARKDOWN_BYTES;
 const MAX_UPLOAD_BYTES = HOSTED_UPLOAD_BYTES;
 const MAX_STORED_SHARE_BYTES = MAX_UPLOAD_BYTES * 2 + 1024 * 1024;
 const PENDING_RECOVERY_MS = 24 * 60 * 60 * 1000;
-const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const RECOVERY_WARNING_ID = /^recovery:[a-f0-9]{64}$/;
 
 type StoredShare = HostedShareRecord & { managementToken: string };
@@ -324,10 +324,11 @@ function validateResponseDestination(response: Response, expected: string): void
 }
 
 function canonicalBase64Png(value: string): Buffer | undefined {
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 !== 0) return undefined;
+  // Canonical round-trip implies the padded standard alphabet, so no pattern scan is needed.
+  if (typeof value !== 'string') return undefined;
   const decoded = Buffer.from(value, 'base64');
   if (decoded.length === 0 || decoded.toString('base64') !== value) return undefined;
-  return decoded.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE) ? decoded : undefined;
+  return hasPngSignature(decoded) ? decoded : undefined;
 }
 
 export class HostedShareClient {
