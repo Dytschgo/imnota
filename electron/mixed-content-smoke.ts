@@ -4,11 +4,10 @@ import { contentItemRelativePaths } from './content-paths.js';
 import path from 'node:path';
 import { dialog, nativeImage } from 'electron';
 import { nativeClipboard } from './native-clipboard.js';
-import JSZip from 'jszip';
 import type { NativeUiDriver, SmokeCapture } from './smoke-native-driver.js';
 import type { SmokeWorkflowHost } from './smoke-workflow.js';
 
-async function chooseWindowsPromptCopyFunction(
+export async function chooseWindowsPromptCopyFunction(
   driver: NativeUiDriver,
   variant: 'files' | 'rich',
 ): Promise<void> {
@@ -28,11 +27,31 @@ async function chooseWindowsPromptCopyFunction(
       const result = await window.imnota.getPreferenceSettings();
       if (primary === ${JSON.stringify(label)} && result.ok && result.value.settings.nativeCopy.defaultFunction === ${JSON.stringify(variant)})
         return resolve(true);
-      if (Date.now() - started > 10000) return reject(new Error('Mixed-content copy function was not persisted.'));
+      if (Date.now() - started > 10000) return reject(new Error('Prompt copy function was not persisted.'));
       setTimeout(check, 50);
     };
     check();
   })`);
+}
+
+/** Finds the exported Markdown/PNG pair whose Markdown is exactly the copied prompt. */
+async function findPromptBundle(
+  exportsDirectory: string,
+  markdown: string,
+): Promise<{ files: string[]; png: Buffer }> {
+  const sets = await fs.readdir(exportsDirectory, { withFileTypes: true });
+  for (const set of sets) {
+    if (!set.isDirectory() || set.name.startsWith('.')) continue;
+    const setDirectory = path.join(exportsDirectory, set.name);
+    const files = await fs.readdir(setDirectory);
+    for (const name of files.filter((file) => file.endsWith('.md') && !file.endsWith(' - overview.md'))) {
+      if ((await fs.readFile(path.join(setDirectory, name), 'utf8')) !== markdown) continue;
+      const pngName = `${path.basename(name, '.md')}.png`;
+      if (!files.includes(pngName)) throw new Error('Mixed prompt bundle export lost its PNG pair.');
+      return { files, png: await fs.readFile(path.join(setDirectory, pngName)) };
+    }
+  }
+  throw new Error('Mixed prompt bundle export did not write the copied Markdown to the collection.');
 }
 
 /** Exercises the real preload, local files, editor input and autosave in disposable fixtures. */
@@ -273,20 +292,24 @@ export async function exerciseMixedContent(
   if (mixedMarkdown.indexOf('# System overview') > mixedMarkdown.indexOf('Drawing 1'))
     throw new Error('Mixed prompt Markdown changed the collection order.');
   await chooseWindowsPromptCopyFunction(driver, 'files');
-  const packagePath = await driver.evaluate<string>(`(async () => {
-    const result = await window.imnota.exportPackage({projectPath:${JSON.stringify(projectPath)},collectionId:${JSON.stringify(drawing.collectionId)},markdown:${JSON.stringify(mixedMarkdown)},annotatedImages:[],includeOriginal:true,includeAnnotations:true});
-    return result.zipPath;
-  })()`);
-  const archive = await JSZip.loadAsync(await fs.readFile(packagePath));
-  const archiveFolder = `collections/${drawing.collectionId}`;
-  if (
-    !(await archive.file(`${archiveFolder}/text/${text.markdownFilename}`)?.async('string'))?.includes(
-      '# System overview',
-    ) ||
-    !archive.file(`${archiveFolder}/drawings/${drawing.sourceFilename}`) ||
-    !archive.file(`${archiveFolder}/drawings/${drawing.imageFilename}`)
-  )
-    throw new Error('Package export omitted local Markdown, editable drawing source, or its PNG.');
+  // The copy above published this bundle through the production prompt-export workflow.
+  const exportedBundle = await findPromptBundle(path.join(directory, 'exports'), mixedMarkdown);
+  const exportedPng = nativeImage.createFromBuffer(exportedBundle.png);
+  if (exportedPng.isEmpty() || exportedPng.getSize().width <= 100 || exportedPng.getSize().height <= 80)
+    throw new Error('Mixed prompt bundle export omitted the rendered drawing PNG.');
+  const exportedPixels = exportedPng.toBitmap();
+  let exportedDarkPixels = 0;
+  for (let offset = 0; offset < exportedPixels.length; offset += 4)
+    if (
+      exportedPixels[offset]! < 180 &&
+      exportedPixels[offset + 1]! < 180 &&
+      exportedPixels[offset + 2]! < 180
+    )
+      exportedDarkPixels += 1;
+  if (exportedDarkPixels < 100)
+    throw new Error('Mixed prompt bundle export lost the visible drawing shapes.');
+  if (exportedBundle.files.some((name) => name.endsWith('.zip')))
+    throw new Error('Legacy ZIP output appeared in the mixed prompt bundle export.');
   await driver.click({ selector: '[data-testid="prompt-sharing-close"]' });
   // Exercise the production confirmation path without the smoke bypass. A repeated
   // native warning must fail immediately rather than hang CI behind a system dialog.
