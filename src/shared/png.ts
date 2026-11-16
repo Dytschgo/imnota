@@ -72,6 +72,15 @@ function chunkType(bytes: Uint8Array, offset: number): string {
   return String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
 }
 
+/** Whether the four type bytes at `offset` are ASCII letters, as the PNG specification requires. */
+function hasLetterChunkType(bytes: Uint8Array, offset: number): boolean {
+  for (let index = offset; index < offset + 4; index++) {
+    const letter = bytes[index] | 0x20;
+    if (letter < 0x61 || letter > 0x7a) return false;
+  }
+  return true;
+}
+
 export interface PngValidationPolicy {
   /** Inclusive byte bounds; failures report `size`. The minimum never drops below a full header. */
   minBytes?: number;
@@ -86,6 +95,11 @@ export interface PngValidationPolicy {
   rejectRepeatedHeader?: boolean;
   /** Maximum chunk count including IHDR and IEND. */
   maxChunks?: number;
+  /**
+   * Reject any chunk whose type bytes are not ASCII letters. Without it a high-bit alias such
+   * as `C9 45 4E 44` is an unknown ancillary chunk, not IEND.
+   */
+  requireLetterChunkTypes?: boolean;
 }
 
 export type PngValidationFailure =
@@ -98,6 +112,7 @@ export type PngValidationFailure =
   | { reason: 'truncated' }
   | { reason: 'truncated-chunk' }
   | { reason: 'crc'; chunkType: string }
+  | { reason: 'chunk-type' }
   | { reason: 'too-many-chunks' }
   | { reason: 'repeated-header' }
   | { reason: 'end-not-empty' }
@@ -146,6 +161,8 @@ export function validatePng(bytes: Uint8Array, policy: PngValidationPolicy): Png
     const crcOffset = offset + 8 + length;
     if (view.getUint32(crcOffset) !== crc32(bytes.subarray(offset + 4, crcOffset)))
       return fail({ reason: 'crc', chunkType: type });
+    if (policy.requireLetterChunkTypes && !hasLetterChunkType(bytes, offset + 4))
+      return fail({ reason: 'chunk-type' });
     chunks += 1;
     if (policy.maxChunks !== undefined && chunks > policy.maxChunks)
       return fail({ reason: 'too-many-chunks' });

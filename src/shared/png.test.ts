@@ -127,6 +127,36 @@ describe('PNG byte checks', () => {
     expect(validatePng(many, { ...policy, maxChunks: 3 })).toMatchObject({ reason: 'too-many-chunks' });
   });
 
+  it('optionally rejects chunk types that are not ASCII letters', () => {
+    const strict = { ...policy, requireLetterChunkTypes: true };
+    const pixels = chunk('IDAT', deflateSync(Buffer.alloc(9)));
+    expect(
+      validatePng(png(2, 2, [ihdr(2, 2), chunk('tEXt'), chunk('zzZZ'), pixels, chunk('IEND')]), strict).ok,
+    ).toBe(true);
+    // IHDR, IDAT and IEND with the high bit set on one type byte (latin1 escapes), and the
+    // bytes just outside A-Z and a-z, between IHDR and IDAT with a normal final IEND.
+    for (const type of [
+      '\u00c9HDR',
+      '\u00c9DAT',
+      '\u00c9END',
+      'IE\u00ceD',
+      'IDA\u00d4',
+      '@END',
+      '[END',
+      '`END',
+      '{END',
+      '1234',
+    ]) {
+      const bytes = png(2, 2, [ihdr(2, 2), chunk(type), pixels, chunk('IEND')]);
+      expect(validatePng(bytes, policy).ok, type).toBe(true);
+      expect(validatePng(bytes, strict), type).toMatchObject({ ok: false, reason: 'chunk-type' });
+    }
+    // A CRC failure is still reported first.
+    const damaged = png(2, 2, [ihdr(2, 2), chunk('\u00c9END'), pixels, chunk('IEND')]);
+    damaged[33 + 8] ^= 1;
+    expect(validatePng(damaged, strict)).toMatchObject({ reason: 'crc' });
+  });
+
   it('requires image data before an empty IEND and nothing after it', () => {
     expect(validatePng(png(2, 2, [ihdr(2, 2), chunk('IEND')]), policy)).toMatchObject({
       reason: 'end-before-data',

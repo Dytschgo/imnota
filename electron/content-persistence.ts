@@ -169,6 +169,7 @@ const DRAWING_PNG_POLICY: PngValidationPolicy = {
   maxPixels: MAX_DRAWING_PIXELS,
   allowedColorTypes: [0, 2, 3, 4, 6],
   maxChunks: 10_000,
+  requireLetterChunkTypes: true,
 };
 
 function drawingPngMessage(failure: PngValidationFailure): string {
@@ -185,6 +186,8 @@ function drawingPngMessage(failure: PngValidationFailure): string {
       return `Drawing PNG ${failure.chunkType} chunk failed CRC validation.`;
     case 'too-many-chunks':
       return 'Drawing PNG contains too many chunks.';
+    case 'chunk-type':
+      return 'Drawing PNG contains an invalid chunk type.';
     case 'end-before-data':
       return failure.trailing ? 'Drawing PNG has an invalid ending.' : 'Drawing PNG is incomplete.';
     case 'end-not-empty':

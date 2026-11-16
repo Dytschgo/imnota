@@ -946,4 +946,22 @@ describe('drawing PNG structural messages', () => {
     });
     for (const [bytes, message] of cases) expect(() => drawingPngDimensions(bytes), message).toThrow(message);
   });
+
+  it('rejects chunk types that are not ASCII letters, including high-bit aliases of critical chunks', () => {
+    const idat = pngChunk('IDAT', Buffer.alloc(3));
+    const iend = pngChunk('IEND');
+    // Review reproduction: an empty, correctly CRC'd chunk typed C9 45 4E 44 between IHDR
+    // and IDAT, with a normal final IEND. The former validator read it as an early IEND.
+    const reproduction = Buffer.from('\u00c9END', 'latin1');
+    expect([...reproduction]).toEqual([0xc9, 0x45, 0x4e, 0x44]);
+    for (const type of ['\u00c9END', '\u00c9HDR', '\u00c9DAT', 'I\u00c4AT', 'IEN\u00c4', '1HDR'])
+      expect(
+        () => drawingPngDimensions(syntheticPng(4, 3, [ihdrChunk(4, 3), pngChunk(type), idat, iend])),
+        type,
+      ).toThrow('Drawing PNG contains an invalid chunk type.');
+    // A high-bit alias in place of the first IHDR is not a header at all.
+    const aliasedHeader = Buffer.from(syntheticPng(4, 3));
+    aliasedHeader[12] = 0xc9;
+    expect(() => drawingPngDimensions(aliasedHeader)).toThrow('Drawing image is not a valid PNG.');
+  });
 });

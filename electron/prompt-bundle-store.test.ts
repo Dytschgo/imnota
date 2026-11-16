@@ -839,4 +839,20 @@ describe('prompt PNG structural messages', () => {
     for (const [bytes, message, expected = { width: 4, height: 3 }] of cases)
       expect(() => validatePromptBundlePng(bytes, expected), message).toThrow(message);
   });
+
+  it('still accepts chunk types that are not ASCII letters, as before', () => {
+    // Prompt bundles never checked type letters; a high-bit alias such as C9 45 4E 44 is an
+    // unknown ancillary chunk here, unlike drawings, which reject it.
+    const idat = pngChunk('IDAT', Buffer.alloc(3));
+    for (const type of ['\u00c9END', '\u00c9HDR', '\u00c9DAT', '1234'])
+      expect(() =>
+        validatePromptBundlePng(
+          syntheticPng(4, 3, [ihdrChunk(4, 3), pngChunk(type), idat, pngChunk('IEND')]),
+          {
+            width: 4,
+            height: 3,
+          },
+        ),
+      ).not.toThrow();
+  });
 });
