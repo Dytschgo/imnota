@@ -297,6 +297,17 @@ export async function exerciseMixedContent(
   const exportedPng = nativeImage.createFromBuffer(exportedBundle.png);
   if (exportedPng.isEmpty() || exportedPng.getSize().width <= 100 || exportedPng.getSize().height <= 80)
     throw new Error('Mixed prompt bundle export omitted the rendered drawing PNG.');
+  const exportedPixels = exportedPng.toBitmap();
+  let exportedDarkPixels = 0;
+  for (let offset = 0; offset < exportedPixels.length; offset += 4)
+    if (
+      exportedPixels[offset]! < 180 &&
+      exportedPixels[offset + 1]! < 180 &&
+      exportedPixels[offset + 2]! < 180
+    )
+      exportedDarkPixels += 1;
+  if (exportedDarkPixels < 100)
+    throw new Error('Mixed prompt bundle export lost the visible drawing shapes.');
   if (exportedBundle.files.some((name) => name.endsWith('.zip')))
     throw new Error('Legacy ZIP output appeared in the mixed prompt bundle export.');
   await driver.click({ selector: '[data-testid="prompt-sharing-close"]' });

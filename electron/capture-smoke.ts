@@ -56,23 +56,57 @@ async function promptExportSets(exportsDirectory: string): Promise<string[]> {
     .map((entry) => entry.name);
 }
 
-/** Waits for the newly published prompt set and returns its first bundle PNG. */
-async function waitForExportedPromptPng(
+/**
+ * Waits for the newly published prompt set and returns every bundle PNG in it. Sets are staged
+ * in a hidden directory and published whole, so a visible set already holds all of its bundles.
+ */
+async function waitForExportedPromptPngs(
   exportsDirectory: string,
   previousSets: ReadonlySet<string>,
-): Promise<Buffer> {
+): Promise<Buffer[]> {
   const deadline = Date.now() + 30_000;
   do {
     for (const name of await promptExportSets(exportsDirectory)) {
       if (previousSets.has(name)) continue;
       const files = await fs.readdir(path.join(exportsDirectory, name));
-      const png = files.find((file) => file.endsWith(' - 01.png'));
-      if (png && files.some((file) => file.endsWith(' - 01.md')))
-        return fs.readFile(path.join(exportsDirectory, name, png));
+      const pngs = files.filter(
+        (file) => / - d+.png$/.test(file) && files.includes(file.replace(/.png$/, '.md')),
+      );
+      if (pngs.length)
+        return Promise.all(pngs.map((file) => fs.readFile(path.join(exportsDirectory, name, file))));
     }
     await delay(50);
   } while (Date.now() < deadline);
   throw new Error('Synthetic capture prompt bundle export did not publish a Markdown/PNG pair.');
+}
+
+/**
+ * Counts pixels matching any synthetic display color and pixels of the default red annotation
+ * stroke (#ef4444). Interior pixels survive bundle scaling; edges blend, hence the tolerances.
+ */
+function capturedExportPixels(png: Buffer, displayCount: number): { capture: number; annotation: number } {
+  const image = nativeImage.createFromBuffer(png);
+  if (image.isEmpty()) return { capture: 0, annotation: 0 };
+  const colors = Array.from({ length: displayCount }, (_, index) => syntheticCaptureColor(index));
+  const bitmap = image.toBitmap();
+  let capture = 0;
+  let annotation = 0;
+  for (let offset = 0; offset < bitmap.length; offset += 4) {
+    const blue = bitmap[offset]!;
+    const green = bitmap[offset + 1]!;
+    const red = bitmap[offset + 2]!;
+    if (
+      colors.some(
+        (color) =>
+          Math.abs(color.blue - blue) <= 3 &&
+          Math.abs(color.green - green) <= 3 &&
+          Math.abs(color.red - red) <= 3,
+      )
+    )
+      capture += 1;
+    else if (red > 180 && green < 120 && blue < 120) annotation += 1;
+  }
+  return { capture, annotation };
 }
 
 function smokeCaptureIsEnabled(): boolean {
@@ -821,16 +855,27 @@ export async function exerciseRegionCapture(
     { selector: `${promptDialog} [data-testid="copy-bundle-1"]:not(:disabled)` },
     { timeoutMs: 30_000 },
   );
-  await driver.click({ selector: '[data-testid="copy-bundle-1"]' });
+  // The capture is the newest item, so copy the last bundle; the pixel check below fails loudly
+  // if the capture is not in the published set.
+  const lastBundle = await driver.evaluate<number>(
+    `Math.max(...[...document.querySelectorAll('[data-testid="prompt-sharing-dialog"] [data-testid^="copy-bundle-"]')].map(element => /^copy-bundle-([0-9]+)$/.exec(element.getAttribute('data-testid'))?.[1]).filter(Boolean).map(Number))`,
+  );
+  if (!Number.isInteger(lastBundle) || lastBundle < 1)
+    throw new Error('Prompt bundle dialog listed no copyable bundle.');
+  await driver.click({ selector: `[data-testid="copy-bundle-${lastBundle}"]` });
   await driver.waitFor(
-    { selector: `${promptDialog} [data-testid="copy-bundle-1"].is-copied` },
+    { selector: `${promptDialog} [data-testid="copy-bundle-${lastBundle}"].is-copied` },
     { timeoutMs: 30_000 },
   );
   await driver.click({ selector: '[data-testid="prompt-sharing-close"]' });
   await driver.waitFor({ selector: '[data-testid="prompt-sharing-dialog"]' }, { absent: true });
-  const exportedPng = await waitForExportedPromptPng(exportsDirectory, setsBeforeExport);
-  if (nativeImage.createFromBuffer(exportedPng).isEmpty())
-    throw new Error('Synthetic capture prompt bundle export is empty.');
+  const exportedPngs = await waitForExportedPromptPngs(exportsDirectory, setsBeforeExport);
+  const displayCount = screen.getAllDisplays().length;
+  const observed = exportedPngs.map((png) => capturedExportPixels(png, displayCount));
+  if (!observed.some((pixels) => pixels.capture >= 500 && pixels.annotation >= 20))
+    throw new Error(
+      `Prompt bundle export lacks the synthetic capture or its rectangle annotation: ${JSON.stringify(observed)}.`,
+    );
 
   overlay = await startCapture(driver);
   await selectRegion(overlay);
