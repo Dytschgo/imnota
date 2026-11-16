@@ -386,6 +386,46 @@ download_verified_asset() {
   echo "Verified ${asset_name} against SHA256SUMS.txt from ${release_tag}."
 }
 
+# Same archive rule as update-macos.sh: a release whose SHA256SUMS.txt lists
+# Imnota-<v>-arm64-mac.zip is arm64-only, otherwise its universal archive is
+# used. Imnota-mac.zip must be the selected archive. Universal releases still
+# install on Intel Macs; arm64-only releases are refused there. Runs after
+# download_verified_asset and before anything is extracted or installed.
+require_supported_macos_archive() {
+  local checksums_path="${temporary_directory}/SHA256SUMS.txt" version="${release_tag#v}"
+  local line checksum alias_checksum="" arm64_checksum="" universal_checksum="" selected selected_checksum
+  local arm64_count=0 universal_count=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    [[ "$line" =~ $checksum_line_pattern ]] ||
+      fail "Malformed SHA256SUMS.txt for ${release_tag}. Nothing was installed and no installed app was changed."
+    checksum="$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')"
+    case "${BASH_REMATCH[2]}" in
+      Imnota-mac.zip) alias_checksum="$checksum" ;;
+      "Imnota-${version}-arm64-mac.zip") arm64_checksum="$checksum" arm64_count=$((arm64_count + 1)) ;;
+      "Imnota-${version}-universal-mac.zip") universal_checksum="$checksum" universal_count=$((universal_count + 1)) ;;
+    esac
+  done < "$checksums_path"
+  if [ "$arm64_count" -gt 1 ] || [ "$universal_count" -gt 1 ]; then
+    fail "SHA256SUMS.txt for ${release_tag} lists a macOS archive more than once. Nothing was installed and no installed app was changed."
+  fi
+  if [ "$arm64_count" -eq 1 ]; then
+    selected="Imnota-${version}-arm64-mac.zip" selected_checksum="$arm64_checksum"
+  elif [ "$universal_count" -eq 1 ]; then
+    selected="Imnota-${version}-universal-mac.zip" selected_checksum="$universal_checksum"
+  else
+    fail "SHA256SUMS.txt for ${release_tag} lists no Imnota-${version} macOS archive. Nothing was installed and no installed app was changed."
+  fi
+  [ "$alias_checksum" = "$selected_checksum" ] ||
+    fail "Imnota-mac.zip is not ${selected} in ${release_tag}. Nothing was installed and no installed app was changed."
+  # Rosetta reports x86_64 from uname, so also ask the kernel about the hardware.
+  if [ "$arm64_count" -eq 1 ] && [ "$(uname -m)" != arm64 ] &&
+    [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" != 1 ] &&
+    [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" != 1 ]; then
+    fail "Imnota ${version} needs a Mac with Apple silicon. Intel Macs are no longer supported. Nothing was installed and no installed app was changed."
+  fi
+}
+
 if [ -n "$release_tag" ]; then
   release_description="release ${release_tag}"
 else
@@ -401,6 +441,7 @@ case "$(uname -s)" in
     archive_path="${temporary_directory}/Imnota-mac.zip"
     echo "Downloading Imnota ${release_description} for macOS..."
     download_verified_asset "Imnota-mac.zip" "$archive_path"
+    require_supported_macos_archive
     ditto -x -k "$archive_path" "$temporary_directory"
     test -x "$temporary_directory/Imnota.app/Contents/MacOS/Imnota"
     codesign --verify --deep --strict "$temporary_directory/Imnota.app"

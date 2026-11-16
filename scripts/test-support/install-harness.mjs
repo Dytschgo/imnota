@@ -41,6 +41,12 @@ export function checksumLine(name, content) {
   return `${sha256(content)}  ${name}`;
 }
 
+/** A release checksum list naming the Mac alias and the versioned universal archive it copies. */
+export function macChecksums(content, version = '1.2.3') {
+  return `${checksumLine('Imnota-mac.zip', content)}
+${checksumLine(`Imnota-${version}-universal-mac.zip`, content)}`;
+}
+
 export function sandbox(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'imnota install [test]-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -77,6 +83,13 @@ uname() {
     -m) printf '%s\n' "\${FAKE_UNAME_M:-x86_64}" ;;
     *) printf '%s\n' "$FAKE_UNAME_S" ;;
   esac
+}
+sysctl() {
+  case "\${2:-}" in
+    hw.optional.arm64) [ -z "\${FAKE_SYSCTL_ARM64:-}" ] || printf '%s\n' "$FAKE_SYSCTL_ARM64" ;;
+    sysctl.proc_translated) [ -z "\${FAKE_SYSCTL_TRANSLATED:-}" ] || printf '%s\n' "$FAKE_SYSCTL_TRANSLATED" ;;
+  esac
+  return 0
 }
 curl() {
   local output="" url="" head=0
@@ -188,6 +201,7 @@ export function runShellInstaller(
     macRunning = false,
     macQuitRefused = false,
     macReadiness = '',
+    macHardware = 'intel',
   } = {},
 ) {
   assert.ok(bash, 'Bash is required for this test');
@@ -196,6 +210,10 @@ export function runShellInstaller(
     HOME: slashes(directories.home),
     TMPDIR: slashes(directories.temporary),
     FAKE_UNAME_S: platform,
+    // Rosetta reports x86_64 from uname while the kernel reports Apple silicon.
+    FAKE_UNAME_M: macHardware === 'arm64' ? 'arm64' : 'x86_64',
+    FAKE_SYSCTL_ARM64: macHardware === 'intel' ? '' : '1',
+    FAKE_SYSCTL_TRANSLATED: macHardware === 'rosetta' ? '1' : '',
     FAKE_PARTIAL_DOWNLOAD: partial,
     FAKE_INSTALL_FAILURE: installFailure,
     FAKE_NATIVE_DITTO: nativeDitto ? '1' : '',
