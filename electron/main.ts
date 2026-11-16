@@ -40,8 +40,6 @@ import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { z } from 'zod';
-import updater from 'electron-updater';
-const { autoUpdater } = updater;
 import type {
   ImagePayload,
   ProjectData,
@@ -92,6 +90,7 @@ import { UpdateController, UpdateFailure } from './update-controller.js';
 import { discoverRelease, type ReleaseCandidate } from './releases.js';
 import { createCiReleaseMetadataRequest } from './release-metadata-request.js';
 import { prepareNativeUpdate } from './native-update.js';
+import { createNativeUpdaterLoader } from './native-updater-loader.js';
 import { detectMacHost, terminalUpdateArguments } from './terminal-update.js';
 import { startMacUpdate, type MacUpdateSession } from './macos-update.js';
 import { promptCollectionGrant, PromptBundleWorkflow } from './prompt-bundle-workflow.js';
@@ -103,7 +102,7 @@ import {
   validateFaultProfileBootstrap,
   bindFaultFixture,
 } from './smoke-fault-ownership.js';
-import { OwnedSmokeFaultController } from './smoke-fault-controller.js';
+import type { OwnedSmokeFaultController } from './smoke-fault-controller.js';
 import { ProjectWatchManager, createRealProjectWatch, projectRevisionForSource } from './project-watch.js';
 import { workflowOutcome } from './workflow-errors.js';
 import { IpcRouter } from './ipc-router.js';
@@ -2139,9 +2138,15 @@ function registerIpc(): void {
 let updateInstallPending = false;
 const UPDATE_STARTUP_CHECK_DELAY_MS = 8_000;
 const UPDATE_RECHECK_INTERVAL_MS = 60 * 60 * 1000;
+// electron-updater (~240 ms to load) is imported on the first native update preparation.
+const nativeUpdater = createNativeUpdaterLoader(
+  async () => (await import('electron-updater')).default.autoUpdater,
+  {
+    progress: (percent) => updateController.progress(percent),
+    error: () => updateController.installationFailed(),
+  },
+);
 function configureAutoUpdates(): void {
-  autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = false;
   // Unsigned Mac builds cannot use Squirrel.Mac. The bundled helper downloads and
   // verifies in the background, then replaces and reopens the app once it quits.
   const macHelper = process.platform === 'darwin';
@@ -2162,7 +2167,7 @@ function configureAutoUpdates(): void {
           terminalUpdateArguments(release, macAppPath(), app.getVersion(), macHost);
           macRelease = release;
         }
-      : (release, channel) => prepareNativeUpdate(autoUpdater, release, channel),
+      : async (release, channel) => prepareNativeUpdate(await nativeUpdater.load(), release, channel),
     download: macHelper
       ? async () => {
           if (!macRelease) throw new Error('No update is available to download.');
@@ -2188,7 +2193,7 @@ function configureAutoUpdates(): void {
           if (session.finished) throw new UpdateFailure(session.failureMessage);
           macSession = session;
         }
-      : () => autoUpdater.downloadUpdate(),
+      : async () => (await nativeUpdater.load()).downloadUpdate(),
     install: macHelper
       ? () => {
           if (!macSession) throw new Error('No downloaded update is ready.');
@@ -2201,7 +2206,12 @@ function configureAutoUpdates(): void {
           }
           app.quit();
         }
-      : () => autoUpdater.quitAndInstall(),
+      : () => {
+          // Installation follows a download, which loaded the updater.
+          const updater = nativeUpdater.loaded;
+          if (!updater) throw new Error('No downloaded update is ready.');
+          updater.quitAndInstall();
+        },
     open: (url) => shell.openExternal(url),
     emit: (status) => {
       if (status.state === 'error' || (status.state === 'downloaded' && status.installing === false))
@@ -2210,9 +2220,6 @@ function configureAutoUpdates(): void {
         mainWindow.webContents.send('update:status', status);
     },
   });
-  autoUpdater.on('download-progress', (progress) => updateController.progress(progress.percent));
-  // Check/download promises own their errors; installation also reports asynchronous native failures.
-  autoUpdater.on('error', () => updateController.installationFailed());
   if (app.isPackaged && process.env.IMNOTA_SMOKE !== '1') {
     // Startup and hourly checks are background checks: the controller
     // coalesces them with manual checks, skips them during a download and
@@ -2287,9 +2294,11 @@ if (singleInstanceLocked && primaryInstance)
 
 app.whenReady().then(async () => {
   if (!primaryInstance) return;
-  await diagnostics.record({ category: 'lifecycle', action: 'startup', phase: 'observed' });
-  const stored =
-    process.env.IMNOTA_SMOKE === '1' ? null : await fs.readFile(settingsFile(), 'utf8').catch(() => null);
+  // Independent: the startup trace does not read settings, and neither operation throws.
+  const [, stored] = await Promise.all([
+    diagnostics.record({ category: 'lifecycle', action: 'startup', phase: 'observed' }),
+    process.env.IMNOTA_SMOKE === '1' ? null : fs.readFile(settingsFile(), 'utf8').catch(() => null),
+  ]);
   if (stored) {
     let persisted: unknown = {};
     try {
@@ -2404,6 +2413,8 @@ app.whenReady().then(async () => {
           }),
           { flag: 'wx' },
         );
+        // Loaded only after the validated fault launch above; ordinary runs never import it.
+        const { OwnedSmokeFaultController } = await import('./smoke-fault-controller.js');
         smokeFaultController = new OwnedSmokeFaultController(faultLaunch, fixture);
         return smokeFaultController;
       },
