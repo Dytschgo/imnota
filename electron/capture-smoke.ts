@@ -787,8 +787,14 @@ export async function exerciseRegionCapture(
     artifacts.push(await driver.capture(artifactDirectory, 'capture-annotation-synthetic.png', captured));
 
   const exportPath = await driver.evaluate<string>(`(async () => {
-    const canvas = document.querySelector('.konvajs-content canvas');
-    if (!(canvas instanceof HTMLCanvasElement)) throw new Error('Annotation canvas was not rendered.');
+    // The stage draws the screenshot, saved marks and the draft on separate layer canvases.
+    const layers = [...(document.querySelector('.konvajs-content')?.querySelectorAll('canvas') ?? [])];
+    if (!(layers[0] instanceof HTMLCanvasElement)) throw new Error('Annotation canvas was not rendered.');
+    const canvas = document.createElement('canvas');
+    canvas.width = layers[0].width;
+    canvas.height = layers[0].height;
+    const context = canvas.getContext('2d');
+    for (const layer of layers) context.drawImage(layer, 0, 0);
     return window.imnota.exportAnnotatedImage({
       projectPath: ${JSON.stringify(projectPath)},
       collectionId: ${JSON.stringify(captured.collectionId)},

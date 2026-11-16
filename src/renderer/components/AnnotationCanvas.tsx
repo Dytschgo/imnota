@@ -66,7 +66,7 @@ import {
   type AnnotationChangeOptions,
   type NudgeBurst,
 } from '../canvas/undo-coalescing';
-import { pixelatedRegion } from '../pixelate';
+import { createPixelationCache } from '../canvas/pixelation-cache';
 import { viewportForLayoutChange, zoomAt, type ViewportSize } from '../viewport';
 import { viewportToReveal } from '../canvas/reveal';
 import { CanvasLoadState } from '../canvas/CanvasLoadState';
@@ -200,6 +200,11 @@ function annotationsStepNumber(count: number): number {
   return count + 1;
 }
 
+/** Copies a pen draft's mutable point buffer so rendered and committed strokes never alias it. */
+function snapshotDraft(draft: Annotation | null): Annotation | null {
+  return draft?.kind === 'pen' && draft.points ? { ...draft, points: draft.points.slice() } : draft;
+}
+
 export function AnnotationCanvas({
   image,
   loadFailed,
@@ -224,6 +229,13 @@ export function AnnotationCanvas({
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const [size, setSize] = useState({ width: 900, height: 600 });
   const [draft, setDraft] = useState<Annotation | null>(null);
+  /**
+   * The latest draft, ahead of `draft` while a frame is pending. Pointer input reads and writes this;
+   * React state follows once per animation frame. A pen draft's `points` here is a mutable buffer.
+   */
+  const draftRef = useRef<Annotation | null>(null);
+  const draftFrame = useRef<number | null>(null);
+  const penPoints = useRef<number[] | null>(null);
   const [cropBox, setCropBox] = useState<Annotation | null>(null);
   const cropTransformerRef = useRef<Konva.Transformer>(null);
   const cropping = tool === 'crop';
@@ -239,6 +251,8 @@ export function AnnotationCanvas({
   const { imageObj, decodeFailed, retryDecode } = useDecodedImage(image?.dataUrl);
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
   const viewportRef = useRef(viewport);
+  /** A pointer pan writes `viewportRef` immediately and commits it to state once per frame. */
+  const panFrame = useRef<number | null>(null);
   const wheelFrame = useRef<number | null>(null);
   const pendingWheel = useRef<
     | (
@@ -267,10 +281,47 @@ export function AnnotationCanvas({
   const explicitEditorResize = useRef<{ id: string; size: AnnotationEditorResize } | null>(null);
   const editorResizeListenerCleanup = useRef<(() => void) | null>(null);
 
+  /** Replaces the draft immediately, dropping any frame-pending pointer update. */
+  const replaceDraft = useCallback((next: Annotation | null) => {
+    if (draftFrame.current !== null) cancelAnimationFrame(draftFrame.current);
+    draftFrame.current = null;
+    penPoints.current = null;
+    draftRef.current = next;
+    setDraft(next);
+  }, []);
+
+  /** Records pointer input now and renders it at most once per animation frame. */
+  const scheduleDraft = useCallback((next: Annotation) => {
+    draftRef.current = next;
+    if (draftFrame.current !== null) return;
+    draftFrame.current = requestAnimationFrame(() => {
+      draftFrame.current = null;
+      setDraft(snapshotDraft(draftRef.current));
+    });
+  }, []);
+
+  /** Commits a frame-pending pan now, so the gesture's last movement is never dropped. */
+  const flushPanFrame = useCallback(() => {
+    if (panFrame.current === null) return;
+    cancelAnimationFrame(panFrame.current);
+    panFrame.current = null;
+    setViewport(viewportRef.current);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (draftFrame.current !== null) cancelAnimationFrame(draftFrame.current);
+      if (panFrame.current !== null) cancelAnimationFrame(panFrame.current);
+      draftFrame.current = null;
+      panFrame.current = null;
+    },
+    [],
+  );
+
   useEffect(() => {
     if (!cropping || !image) {
       setCropBox(null);
-      setDraft(null);
+      replaceDraft(null);
       return;
     }
     const bounds = exportBounds(image.width, image.height, annotations);
@@ -293,7 +344,7 @@ export function AnnotationCanvas({
       onMessage?.('Crop applied. The original image is preserved; Undo restores the previous crop.');
     }
     setCropBox(null);
-    setDraft(null);
+    replaceDraft(null);
     onTool?.('select');
     onSelect(null);
   }
@@ -327,7 +378,8 @@ export function AnnotationCanvas({
   }, [cropping, cropBox, draft, imageObj]);
 
   useEffect(() => {
-    viewportRef.current = viewport;
+    // A pan frame still pending holds newer input than this committed state.
+    if (panFrame.current === null) viewportRef.current = viewport;
   }, [viewport]);
 
   useLayoutEffect(
@@ -335,6 +387,8 @@ export function AnnotationCanvas({
       if (wheelFrame.current !== null) cancelAnimationFrame(wheelFrame.current);
       wheelFrame.current = null;
       pendingWheel.current = null;
+      if (panFrame.current !== null) cancelAnimationFrame(panFrame.current);
+      panFrame.current = null;
     },
     [image?.filename, image?.dataUrl],
   );
@@ -413,7 +467,7 @@ export function AnnotationCanvas({
         setSpaceHeld(true);
       }
       if (event.key === 'Escape') {
-        setDraft(null);
+        replaceDraft(null);
         pan.current = null;
         onSelect(null);
       }
@@ -426,7 +480,7 @@ export function AnnotationCanvas({
     const blur = (event: FocusEvent) => {
       setSpaceHeld(false);
       pan.current = null;
-      setDraft(null);
+      replaceDraft(null);
       finalizePointerInteractionRef.current(event);
     };
     window.addEventListener('keydown', down);
@@ -437,7 +491,7 @@ export function AnnotationCanvas({
       window.removeEventListener('keyup', up);
       window.removeEventListener('blur', blur);
     };
-  }, [onSelect]);
+  }, [onSelect, replaceDraft]);
 
   useEffect(() => {
     const resizeObserver = new ResizeObserver(() => {
@@ -541,17 +595,28 @@ export function AnnotationCanvas({
     return () => cancelAnimationFrame(frame);
   }, [revealAnnotationId, annotations, image, imageObj, size, stageRef]);
 
+  const [pixelationCache] = useState(createPixelationCache);
+  // Only a region whose image, bounds or block size changed is rebuilt; drawing a draft rebuilds just its own.
   const pixelated = useMemo(
     () =>
-      new Map(
-        imageObj
-          ? [...annotations, ...(draft ? [draft] : [])]
-              .filter((annotation) => annotation.kind === 'pixelate')
-              .map((annotation) => [annotation.id, pixelatedRegion(imageObj, annotation)])
-          : [],
-      ),
-    [annotations, draft, imageObj],
+      imageObj
+        ? pixelationCache.regions(imageObj, draft ? [...annotations, draft] : annotations)
+        : new Map<string, HTMLCanvasElement>(),
+    [annotations, draft, imageObj, pixelationCache],
   );
+  // Release replaced and removed regions only after the canvases that replace them are committed.
+  useEffect(() => pixelationCache.retain(pixelated), [pixelated, pixelationCache]);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      // Strict Mode remounts at once; release the regions only when the canvas is really gone.
+      queueMicrotask(() => {
+        if (!mounted.current) pixelationCache.clear();
+      });
+    };
+  }, [pixelationCache]);
   const noteNumbers = useMemo(() => textAnnotationNoteNumbers(annotations), [annotations]);
 
   useEffect(() => {
@@ -657,7 +722,8 @@ export function AnnotationCanvas({
   function abortPointerInteraction(event?: Event) {
     finalizePointerInteraction(event);
     pan.current = null;
-    setDraft(null);
+    flushPanFrame();
+    replaceDraft(null);
   }
 
   finalizePointerInteractionRef.current = abortPointerInteraction;
@@ -754,7 +820,7 @@ export function AnnotationCanvas({
       createTextAt(point);
       return;
     }
-    setDraft(
+    replaceDraft(
       createDefaultAnnotation(
         tool,
         point.x,
@@ -779,33 +845,42 @@ export function AnnotationCanvas({
       };
       userAdjustedViewport.current = true;
       viewportRef.current = next;
-      setViewport(next);
+      if (panFrame.current === null)
+        panFrame.current = requestAnimationFrame(() => {
+          panFrame.current = null;
+          setViewport(viewportRef.current);
+        });
       return;
     }
-    if (!draft || ['callout', 'step'].includes(draft.kind)) return;
+    const current = draftRef.current;
+    if (!current || ['callout', 'step'].includes(current.kind)) return;
     const point = imagePoint(event.evt);
     if (!point) return;
     // Shift snaps lines and arrows to 45° steps and makes boxes square; without it the delta is untouched.
     const delta = constrainDraftDelta(
-      draft.kind,
-      { x: point.x - draft.x, y: point.y - draft.y },
+      current.kind,
+      { x: point.x - current.x, y: point.y - current.y },
       event.evt.shiftKey,
     );
-    if (draft.kind === 'pen')
-      setDraft({
-        ...draft,
-        points: [...(draft.points ?? [0, 0]), delta.x, delta.y],
+    if (current.kind === 'pen') {
+      // Append to one buffer instead of copying the whole stroke on every move.
+      let points = penPoints.current;
+      if (!points || current.points !== points) points = penPoints.current = [...(current.points ?? [0, 0])];
+      points.push(delta.x, delta.y);
+      scheduleDraft({
+        ...current,
+        points,
         width: Math.max(4, Math.abs(delta.x)),
         height: Math.max(4, Math.abs(delta.y)),
       });
-    else if (draft.kind === 'arrow' || draft.kind === 'line')
-      setDraft({
-        ...draft,
+    } else if (current.kind === 'arrow' || current.kind === 'line')
+      scheduleDraft({
+        ...current,
         points: [0, 0, delta.x, delta.y],
         width: Math.abs(delta.x),
         height: Math.abs(delta.y),
       });
-    else setDraft({ ...draft, width: delta.x, height: delta.y });
+    else scheduleDraft({ ...current, width: delta.x, height: delta.y });
   }
 
   function endPointer(event: Konva.KonvaEventObject<PointerEvent>) {
@@ -820,21 +895,24 @@ export function AnnotationCanvas({
     if (wasDragging) return;
     if (pan.current) {
       pan.current = null;
+      flushPanFrame();
       return;
     }
-    if (!draft) return;
+    // The latest pointer input, including any move still waiting for its frame.
+    const current = snapshotDraft(draftRef.current);
+    if (!current) return;
     if (
-      Math.abs(draft.width ?? 0) < 4 &&
-      Math.abs(draft.height ?? 0) < 4 &&
-      !['callout', 'step'].includes(draft.kind)
+      Math.abs(current.width ?? 0) < 4 &&
+      Math.abs(current.height ?? 0) < 4 &&
+      !['callout', 'step'].includes(current.kind)
     ) {
-      setDraft(null);
+      replaceDraft(null);
       return;
     }
-    const completed = normalizeAnnotationBounds(draft);
+    const completed = normalizeAnnotationBounds(current);
     if (completed.kind === 'crop') {
       setCropBox({ ...completed, id: 'crop-preview' });
-      setDraft(null);
+      replaceDraft(null);
       return;
     }
     // The completion click can hit the stage or an older shape under the new mark.
@@ -845,7 +923,7 @@ export function AnnotationCanvas({
       onSelect(completed.id);
       onTool?.('select');
     }
-    setDraft(null);
+    replaceDraft(null);
   }
 
   function handleCanvasKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
@@ -1147,6 +1225,10 @@ export function AnnotationCanvas({
     ? textAnnotationLayout({ ...editedAnnotation, text: editing?.text ?? editedAnnotation.text }, measureText)
     : null;
   const editorPresentation = editedLayout ? textEditorPresentationSize(editedLayout, viewport.scale) : null;
+  const viewTransform = { x: viewport.x, y: viewport.y, scaleX: viewport.scale, scaleY: viewport.scale };
+  const sortedAnnotations = annotations
+    .filter((annotation) => annotation.kind !== 'crop')
+    .sort((left, right) => left.zIndex - right.zIndex);
 
   return (
     <div
@@ -1238,15 +1320,23 @@ export function AnnotationCanvas({
             if (event.target === event.target.getStage()) onSelect(null);
           }}
         >
-          <Layer>
-            <Group x={viewport.x} y={viewport.y} scaleX={viewport.scale} scaleY={viewport.scale}>
+          {/*
+            Three layers, bottom to top, so a draft frame redraws only the top canvas: the full-resolution
+            screenshot (never hit-tested), saved annotations, then the draft, crop overlay and transformers.
+            The screenshot stays the first stage canvas, which native smoke checks sample for image pixels.
+          */}
+          <Layer listening={false}>
+            <Group {...viewTransform}>
               <KonvaImage image={imageObj} {...sourceBounds} crop={sourceBounds} listening={false} />
-              <Group listening={!cropping}>
-                {[...annotations]
-                  .filter((annotation) => annotation.kind !== 'crop')
-                  .sort((left, right) => left.zIndex - right.zIndex)
-                  .map(renderAnnotation)}
-              </Group>
+            </Group>
+          </Layer>
+          <Layer>
+            <Group {...viewTransform} listening={!cropping}>
+              {sortedAnnotations.map(renderAnnotation)}
+            </Group>
+          </Layer>
+          <Layer>
+            <Group {...viewTransform}>
               {draft && draft.kind !== 'crop' && renderAnnotation(normalizeAnnotationBounds(draft))}
               {cropping && image && (cropBox || draft?.kind === 'crop') && (
                 <>
@@ -1448,7 +1538,7 @@ export function AnnotationCanvas({
             type="button"
             onClick={() => {
               setCropBox(null);
-              setDraft(null);
+              replaceDraft(null);
             }}
           >
             Draw new crop
