@@ -25,7 +25,7 @@ import type { RecentlyDeletedItem, RecentlyDeletedRestoreResult } from '../share
 import { nowIso } from '../shared/utils';
 import { orderedCollectionItems } from '../shared/content-items';
 import { useContentPersistence } from './content/useContentPersistence';
-import type { AppDialog, NewProjectDraft, ProjectEditDraft } from './app/AppDialogs';
+import { AppDialogs, type AppDialog, type NewProjectDraft, type ProjectEditDraft } from './app/AppDialogs';
 import { AppShell } from './app/AppShell';
 import { useAppearance } from './app/useAppearance';
 import { usePreferences } from './app/usePreferences';
@@ -39,14 +39,10 @@ import { Logo } from './components/Logo';
 import type { ToolChoice } from './components/Toolbar';
 import { Button, IconButton, Modal } from './components/ui';
 import {
-  AppDialogs,
-  CaptureDestinationDialog,
   OnboardingDemo,
   PromptBundleDialogHost,
-  SearchDialog,
   SettingsView,
   useDeferredSurfacePreload,
-  WhatsNewDialog,
 } from './app/lazy-surfaces';
 import { usePromptBundleController } from './export/usePromptBundleController';
 import { SETTINGS_CATEGORIES, type SettingsCategory } from './settings/settings-categories';
@@ -69,11 +65,12 @@ import {
   observeNativeFaultSave,
 } from './app/native-fault-gate';
 import { FAULT_DESCRIPTION, FAULT_MARKDOWN } from '../shared/native-fault-fixtures';
-import type { ProjectSearchScope, ProjectSearchTarget } from './search';
+import { SearchDialog, type ProjectSearchScope, type ProjectSearchTarget } from './search';
 import './app/project-management.css';
 import { Library } from './app/Library';
 import { Welcome } from './app/Welcome';
 import { WorkflowRequestError, workflowValue } from './app/workflow';
+import { CaptureDestinationDialog } from './capture/CaptureDestinationDialog';
 import {
   captureDestinationChoices,
   currentCaptureDestination,
@@ -81,7 +78,7 @@ import {
   type CaptureDestination,
   type CaptureDestinationChoice,
 } from './capture/capture-destination';
-import type { WhatsNewAction } from './components/WhatsNew';
+import { WhatsNewDialog, type WhatsNewAction } from './components/WhatsNew';
 import { findWhatsNewRelease, shouldShowWhatsNew } from '../shared/whats-new';
 import { reasonMessage, splitDiagnosticReference, userFacingErrorMessage } from './user-facing-error';
 

@@ -10,10 +10,11 @@ export interface PreloadableComponent<P extends object> {
  * A code-split component with its own Suspense boundary. Once `preload` has finished, new
  * instances render directly instead of suspending, so a preloaded surface never shows its
  * fallback. An instance keeps the element type it mounted with, so loading never remounts it.
+ * A function fallback receives the current props, so it can follow them while loading.
  */
 export function lazyWithPreload<P extends object>(
   load: () => Promise<ComponentType<P>>,
-  fallback: ReactNode = null,
+  fallback: ReactNode | ((props: P) => ReactNode) = null,
 ): PreloadableComponent<P> {
   let loaded: ComponentType<P> | undefined;
   let pending: Promise<ComponentType<P>> | undefined;
@@ -31,7 +32,7 @@ export function lazyWithPreload<P extends object>(
     const [Direct] = useState(() => loaded);
     if (Direct) return <Direct {...props} />;
     return (
-      <Suspense fallback={fallback}>
+      <Suspense fallback={typeof fallback === 'function' ? fallback(props) : fallback}>
         <Lazy {...props} />
       </Suspense>
     );

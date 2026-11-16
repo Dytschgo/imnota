@@ -525,6 +525,26 @@ describe('feedback controls', () => {
     expect(useAppStore.getState().snapshot).not.toBeNull();
   });
 
+  it('opens search from its shortcut as a modal over the focused row and keeps what is typed', async () => {
+    const deleteScreenshot = vi.fn<ImnotaBridge['deleteScreenshot']>();
+    await renderEditingProject({ deleteScreenshot });
+    const row = screen.getByTestId('screenshot-shot');
+    row.focus();
+
+    fireEvent.keyDown(row, { key: 'f', ctrlKey: true });
+    const search = await screen.findByTestId('global-search-input');
+    await waitFor(() => expect(search).toHaveFocus());
+    fireEvent.change(search, { target: { value: 'checkout' } });
+    fireEvent.keyDown(search, { key: 'Delete', ctrlKey: true });
+    expect(search).toHaveValue('checkout');
+    expect(screen.queryByRole('dialog', { name: 'Delete this screenshot?' })).not.toBeInTheDocument();
+    expect(deleteScreenshot).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(search, { key: 'Escape' });
+    expect(screen.queryByTestId('global-search-input')).not.toBeInTheDocument();
+    expect(row).toHaveFocus();
+  });
+
   it('keeps the workspace location while global search is open', async () => {
     const loadProject = vi.fn(async () => snapshot);
     renderApp({
