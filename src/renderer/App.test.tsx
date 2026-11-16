@@ -3906,6 +3906,63 @@ describe('feedback controls', () => {
       expect(first).not.toHaveAttribute('aria-busy');
     });
 
+    it('still reports a retained-folder failure after the user navigates away', async () => {
+      const retained =
+        'Duplicate failed; incomplete files were retained at /workspace/Project copy for manual inspection: Copy interrupted.';
+      let rejectDuplicate!: (reason: Error) => void;
+      renderApp({
+        listProjects: async () => [source],
+        duplicateProject: () =>
+          new Promise<ProjectSnapshot>((_resolve, reject) => {
+            rejectDuplicate = reject;
+          }),
+      });
+      const duplicate = await screen.findByTestId('project-duplicate-project-id');
+      fireEvent.click(duplicate);
+      await waitFor(() => expect(duplicate).toBeDisabled());
+      fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+      await waitFor(() => expect(useAppStore.getState().view).toBe('settings'));
+
+      await act(async () => rejectDuplicate(new Error(retained)));
+      expect(await screen.findByText(retained)).toBeVisible();
+      expect(screen.queryByText('Project duplicated')).toBeNull();
+    });
+
+    it('records the opened copy in history before refreshing the list', async () => {
+      let copied = false;
+      let releaseRefresh!: () => void;
+      const listProjects = vi.fn(async () => {
+        if (!copied) return [source];
+        await new Promise<void>((resolve) => {
+          releaseRefresh = resolve;
+        });
+        return [source, { ...copy.project, projectPath: copy.projectPath }];
+      });
+      const loadProject = vi.fn<ImnotaBridge['loadProject']>(async (projectPath) =>
+        projectPath === copy.projectPath ? copy : snapshot,
+      );
+      renderApp({
+        listProjects,
+        loadProject,
+        duplicateProject: async () => {
+          copied = true;
+          return copy;
+        },
+      });
+      fireEvent.click(await screen.findByTestId('project-duplicate-project-id'));
+      await waitFor(() => expect(useAppStore.getState().snapshot?.projectPath).toBe(copy.projectPath));
+      await waitFor(() => expect(releaseRefresh).toBeTypeOf('function'));
+      fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+      await waitFor(() => expect(useAppStore.getState().view).toBe('settings'));
+      await act(async () => releaseRefresh());
+      expect(await screen.findByText('Project duplicated')).toBeVisible();
+
+      // Back returns to the opened copy, not to the Library the duplicate started from.
+      fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+      await waitFor(() => expect(useAppStore.getState().view).toBe('workspace'));
+      expect(useAppStore.getState().snapshot?.projectPath).toBe(copy.projectPath);
+    });
+
     it('does not offer Duplicate for archived projects', async () => {
       renderApp({ listProjects: async () => [{ ...source, status: 'archived' as const }] });
       fireEvent.click(

@@ -1521,25 +1521,39 @@ export default function App() {
     setDuplicatingProjectPath(projectPath);
     const previousLocation = currentLocation();
     let duplicated = false;
+    let duplicateFailure: string | undefined;
     try {
       const opened = await guardedSnapshot(async () => {
-        const copy = await window.imnota.duplicateProject(projectPath);
-        duplicated = true;
-        return copy;
+        try {
+          const copy = await window.imnota.duplicateProject(projectPath);
+          duplicated = true;
+          return copy;
+        } catch (reason) {
+          duplicateFailure = reasonMessage(reason, 'Duplicating the project');
+          throw reason;
+        }
       }, 'Duplicating the project');
+      // guardedSnapshot drops errors after newer navigation, but a failed copy can name a
+      // retained incomplete folder, so always surface it.
+      if (duplicateFailure !== undefined) {
+        setError(duplicateFailure);
+        return;
+      }
       if (!duplicated) return;
+      // Record the opened copy before the refresh await, so later navigation cannot be
+      // overwritten by this history update.
+      if (opened) {
+        clearSearchSelection();
+        setNavigationStack((stack) =>
+          pushNavigationLocation(replaceNavigationLocation(stack, previousLocation), currentLocation()),
+        );
+      }
       // The copy exists even if newer navigation or adoption prevented opening it.
       try {
         await refreshProjects();
       } catch (reason) {
         setError(
           `The project was duplicated, but the project list could not be refreshed: ${reasonMessage(reason, 'Try again.')}`,
-        );
-      }
-      if (opened) {
-        clearSearchSelection();
-        setNavigationStack((stack) =>
-          pushNavigationLocation(replaceNavigationLocation(stack, previousLocation), currentLocation()),
         );
       }
       showToast('Project duplicated');
