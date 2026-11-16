@@ -230,11 +230,11 @@ The artwork originals are 1672x941 PNGs, approximately 16:9, totaling 6.06 MiB. 
 
 Representative captures below show the combined candidate and the isolated preview fixture. They use synthetic verification content, not personal project files.
 
-![Combined dark editor with compact header, row trash and simplified inspector](../ui-feedback/combined-dark.png)
+![Combined dark editor with compact header, row trash and simplified inspector](ui-feedback/combined-dark.png)
 
-![Light theme with the generated Mist background visible through app surfaces](../ui-feedback/light-backdrop.png)
+![Light theme with the generated Mist background visible through app surfaces](ui-feedback/light-backdrop.png)
 
-![Full-space tall bundle preview fitted without cropping](../ui-feedback/full-preview.png)
+![Full-space tall bundle preview fitted without cropping](ui-feedback/full-preview.png)
 
 ### Integration review corrections
 
