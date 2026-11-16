@@ -6,6 +6,8 @@ import { load } from 'js-yaml';
 import {
   faultCaseSets,
   faultCases,
+  faultCaseErrno,
+  assertFaultCaseEvidence,
   assertFaultReport,
   assertFaultAggregate,
 } from './native-fault-catalog.mjs';
@@ -27,6 +29,97 @@ describe('closed packaged native fault gate', () => {
     assert.throws(() => assertFaultAggregate([...results, results[0]]));
     assert.throws(() =>
       assertFaultAggregate(results.map((value, i) => (i ? value : { ...value, passed: false }))),
+    );
+    // The retired per-errno launches are not accepted in place of their combined set.
+    assert.throws(() => faultCases('restore-eio'));
+    assert.throws(() => faultCases('recovery-lineage-eperm'));
+    assert.throws(() =>
+      assertFaultAggregate([
+        ...['restore-eio', 'restore-eacces', 'restore-eperm'].map((caseSet) => ({ caseSet, passed: true })),
+        ...results.slice(1),
+      ]),
+    );
+  });
+  it('keeps every errno x scenario case distinct inside the combined launches', () => {
+    assert.equal(faultCaseSets.length, 8);
+    assert.equal(faultCaseSets.flatMap((caseSet) => faultCases(caseSet)).length, 35);
+    for (const [caseSet, scenarios] of [
+      ['restore-errno', ['screenshot', 'drawing', 'text']],
+      ['recovery-lineage-errno', ['healthy', 'foreign']],
+    ]) {
+      const cases = faultCases(caseSet);
+      assert.equal(new Set(cases).size, cases.length);
+      assert.deepEqual(
+        cases,
+        ['eio', 'eacces', 'eperm'].flatMap((errno) => scenarios.map((scenario) => `${scenario}-${errno}`)),
+      );
+      for (const caseId of cases)
+        assert.equal(faultCaseErrno(caseSet, caseId), caseId.split('-').at(-1).toUpperCase());
+    }
+    assert.equal(faultCaseErrno('restore-marker', 'text'), undefined);
+    assert.throws(() => faultCaseErrno('restore-errno', 'text'));
+  });
+  it('accepts case evidence only with one arm, one disarm and its own errno injections', () => {
+    const evidence = (caseSet, caseId, events) => ({
+      passed: true,
+      caseSet,
+      caseId,
+      disarmed: true,
+      events,
+    });
+    const armed = (caseId, errno) => ({ event: 'armed', caseId, errno });
+    const injected = (caseId, errno) => ({ event: 'injected', caseId, errno });
+    const disarmed = { event: 'disarmed', consumed: ['metadata'] };
+    const valid = [armed('drawing-eacces', 'EACCES'), injected('drawing-eacces', 'EACCES'), disarmed];
+    assert.doesNotThrow(() =>
+      assertFaultCaseEvidence(
+        'restore-errno',
+        'drawing-eacces',
+        evidence('restore-errno', 'drawing-eacces', valid),
+      ),
+    );
+    for (const [label, caseId, events, overrides] of [
+      ['wrong errno', 'drawing-eacces', [valid[0], injected('drawing-eacces', 'EIO'), disarmed]],
+      ['leaked case', 'drawing-eacces', [valid[0], injected('screenshot-eacces', 'EACCES'), disarmed]],
+      ['no injection', 'drawing-eacces', [valid[0], disarmed]],
+      ['armed errno', 'drawing-eacces', [armed('drawing-eacces', 'EPERM'), valid[1], disarmed]],
+      ['missing arm', 'drawing-eacces', [valid[1], disarmed]],
+      ['missing disarm', 'drawing-eacces', valid.slice(0, 2)],
+      ['double arm', 'drawing-eacces', [valid[0], ...valid]],
+      ['injection after disarm', 'drawing-eacces', [valid[0], disarmed, valid[1]]],
+      ['other case evidence', 'text-eacces', valid],
+      ['failed', 'drawing-eacces', valid, { passed: false }],
+      ['not disarmed', 'drawing-eacces', valid, { disarmed: false }],
+      ['wrong set', 'drawing-eacces', valid, { caseSet: 'restore-marker' }],
+    ])
+      assert.throws(
+        () =>
+          assertFaultCaseEvidence('restore-errno', caseId, {
+            ...evidence('restore-errno', 'drawing-eacces', events),
+            ...overrides,
+          }),
+        /own armed/,
+        label,
+      );
+    // Fixed-errno scenarios keep their designed codes and may finish without an injection.
+    assert.doesNotThrow(() =>
+      assertFaultCaseEvidence(
+        'restore-marker',
+        'text',
+        evidence('restore-marker', 'text', [
+          armed('text', 'EIO'),
+          injected('text', 'EIO'),
+          injected('text', 'EACCES'),
+          disarmed,
+        ]),
+      ),
+    );
+    assert.doesNotThrow(() =>
+      assertFaultCaseEvidence(
+        'restore-later-change',
+        'text',
+        evidence('restore-later-change', 'text', [armed('text', 'EIO'), disarmed]),
+      ),
     );
   });
   it('requires every case, exact nonce/version and disarm before accepting a child result', () => {

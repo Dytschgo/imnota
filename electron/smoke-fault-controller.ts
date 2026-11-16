@@ -10,8 +10,10 @@ import type { ProjectWatchDependencies } from './project-watch.js';
 import {
   faultObservationSchema,
   nativeFaultCases,
+  nativeFaultErrno,
   type FaultCommand,
   type FaultObservation,
+  type NativeFaultErrno,
   type NativeFaultKind,
   type NativeFaultOwnership,
 } from '../src/shared/native-faults.js';
@@ -59,6 +61,13 @@ class InjectedNativeFault extends Error {
   }
 }
 type WatchHandle = ReturnType<ProjectWatchDependencies['createWatch']>;
+type ActiveCase = CaseInput & {
+  identity: Awaited<ReturnType<typeof faultIdentity>>;
+  metadataIdentity: Awaited<ReturnType<typeof faultIdentity>>;
+  before: string;
+  /** Bound at arm time so a combined errno launch cannot carry one case's errno into the next. */
+  errno: NativeFaultErrno;
+};
 type Journal = { phase: string; [key: string]: unknown };
 const RESTORE = new Set(['screenshots:undo-delete', 'content:undo-delete']);
 const SAVES = new Set(['content:save', 'projects:save-screenshot', 'workflow:project-watch:cas']);
@@ -67,11 +76,7 @@ const SAVES = new Set(['content:save', 'projects:save-screenshot', 'workflow:pro
 export class OwnedSmokeFaultController {
   private saveObservation?: { requestId: string; started: boolean };
   private readonly context = new AsyncLocalStorage<Invocation>();
-  private active?: CaseInput & {
-    identity: Awaited<ReturnType<typeof faultIdentity>>;
-    metadataIdentity: Awaited<ReturnType<typeof faultIdentity>>;
-    before: string;
-  };
+  private active?: ActiveCase;
   private readonly consumed = new Set<string>();
   private readonly watches = new Map<string, { handle: WatchHandle; fail: (error: Error) => void }>();
   private readonly watchProjects = new Map<string, string>();
@@ -137,12 +142,14 @@ export class OwnedSmokeFaultController {
       const journal = await this.journal(input);
       if (journal.phase !== 'deleted') this.fail('Restore must arm against a deleted journal.');
     }
+    const errno = nativeFaultErrno(this.proof.caseSet, input.caseId);
     this.consumed.clear();
     this.caseStart = this.events.length;
-    this.active = { ...input, identity, metadataIdentity, before: faultDigest(source) };
+    this.active = { ...input, identity, metadataIdentity, before: faultDigest(source), errno };
     this.record({
       event: 'armed',
       caseId: input.caseId,
+      errno,
       project: path.relative(this.fixture, input.projectPath),
       identity,
       metadataIdentity,
@@ -221,15 +228,13 @@ export class OwnedSmokeFaultController {
     if (matches.length !== 1) this.fail('Fault did not reach one exact applying transaction candidate.');
     return matches[0];
   }
-  private error(code = this.code()): Error {
-    return new InjectedNativeFault(code);
-  }
-  private code(): string {
-    return this.proof.caseSet.endsWith('eacces')
-      ? 'EACCES'
-      : this.proof.caseSet.endsWith('eperm')
-        ? 'EPERM'
-        : 'EIO';
+  /** Only the still-armed owner may inject; its errno is the case's own unless a scenario fixes one. */
+  private injected(owner: ActiveCase | undefined, code?: NativeFaultErrno): Error {
+    if (!owner || owner !== this.active || this.terminal)
+      this.fail('Injected fault outlived its armed case.');
+    const errno = code ?? owner.errno;
+    this.record({ event: 'injected', caseId: owner.caseId, errno });
+    return new InjectedNativeFault(errno);
   }
 
   atomicVerification(target: string): AtomicWriteVerification | undefined {
@@ -288,7 +293,7 @@ export class OwnedSmokeFaultController {
           )
             this.fail('Marker fault reached the wrong journal phase.');
           await this.consume('marker', { preimage, sourceHash });
-          throw this.error('EACCES');
+          throw this.injected(active, 'EACCES');
         }
         if (
           target === repair &&
@@ -300,7 +305,7 @@ export class OwnedSmokeFaultController {
           if (sourceHash !== active.repairBefore)
             this.fail('Repair fault is not writing the original before-image.');
           await this.consume('repair', { preimage, sourceHash });
-          throw this.error('EACCES');
+          throw this.injected(active, 'EACCES');
         }
       },
       beforeCandidateSync: async () => {
@@ -315,12 +320,12 @@ export class OwnedSmokeFaultController {
           return;
         const transaction = await this.transactionWitness(sourceHash, preimage);
         await this.consume('candidate', { preimage, sourceHash, beforeIdentity, transaction });
-        throw this.error();
+        throw this.injected(active);
       },
       beforeParentSync: async (_target, _directory, boundary) => {
         if (target !== metadata) return;
         const fault = restoring ? 'metadata' : `commit-${invocation.channel}`;
-        if (this.consumed.has(fault) || (!restoring && !this.proof.caseSet.startsWith('recovery-lineage-')))
+        if (this.consumed.has(fault) || (!restoring && this.proof.caseSet !== 'recovery-lineage-errno'))
           return;
         const committedIdentity = await faultIdentity(target);
         if (faultDigest(await fs.readFile(target)) !== sourceHash)
@@ -348,7 +353,7 @@ export class OwnedSmokeFaultController {
           transaction,
         });
         if (invocation.channel === 'content:save') this.closeOwnedWatch();
-        throw this.error();
+        throw this.injected(active);
       },
     };
     return {
@@ -383,7 +388,7 @@ export class OwnedSmokeFaultController {
             this.fail('Confirmation fault reached the wrong operation.');
           await this.consume('confirmation');
           if (this.active!.caseId.endsWith('changed')) await this.writeForeignMetadata();
-          else throw this.error('EACCES');
+          else throw this.injected(this.active, 'EACCES');
         }),
     };
   }
@@ -554,7 +559,7 @@ export class OwnedSmokeFaultController {
       this.context.getStore()?.channel === 'workflow:project-watch:reload'
     ) {
       await this.consume('readback');
-      throw this.error('EACCES');
+      throw this.injected(this.active, 'EACCES');
     }
     return read();
   }

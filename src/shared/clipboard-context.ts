@@ -1,3 +1,5 @@
+import { PNG_HEADER_BYTES, readPngHeader } from './png.js';
+
 export const MAX_CLIPBOARD_EDGE = 8192;
 export const MAX_CLIPBOARD_PIXELS = 16_000_000;
 export const MAX_CLIPBOARD_PNG_LENGTH = 32_000_000;
@@ -16,20 +18,17 @@ export function clipboardPngDimensions(dataUrl: string): { width: number; height
   const prefix = 'data:image/png;base64,';
   if (!dataUrl.startsWith(prefix) || dataUrl.length > MAX_CLIPBOARD_PNG_LENGTH)
     throw new Error('The annotated PNG is invalid or too large. Use the exported PNG files instead.');
-  let bytes: Uint8Array;
+  let header: ReturnType<typeof readPngHeader>;
   try {
-    bytes = Uint8Array.from(atob(dataUrl.slice(prefix.length, prefix.length + 44)), (c) => c.charCodeAt(0));
+    // Decode only the signature and IHDR chunk before allocating anything larger.
+    const base64 = dataUrl.slice(prefix.length, prefix.length + (PNG_HEADER_BYTES / 3) * 4);
+    header = readPngHeader(Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)));
   } catch {
-    throw new Error('The annotated PNG could not be read. Export it again.');
+    header = undefined;
   }
-  const signature = [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82];
-  if (bytes.length < 24 || signature.some((byte, i) => bytes[i] !== byte))
-    throw new Error('The annotated PNG could not be read. Export it again.');
-  const view = new DataView(bytes.buffer);
-  const width = view.getUint32(16);
-  const height = view.getUint32(20);
-  checkClipboardDimensions(width, height);
-  return { width, height };
+  if (!header) throw new Error('The annotated PNG could not be read. Export it again.');
+  checkClipboardDimensions(header.width, header.height);
+  return { width: header.width, height: header.height };
 }
 
 export function contactSheetLayout(sizes: Array<{ width: number; height: number }>) {
