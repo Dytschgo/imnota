@@ -67,7 +67,7 @@ import {
   type NudgeBurst,
 } from '../canvas/undo-coalescing';
 import { createPixelationCache } from '../canvas/pixelation-cache';
-import { viewportForLayoutChange, zoomAt, type ViewportSize } from '../viewport';
+import { viewportForLayoutChange, zoomAt, type Viewport, type ViewportSize } from '../viewport';
 import { viewportToReveal } from '../canvas/reveal';
 import { CanvasLoadState } from '../canvas/CanvasLoadState';
 import type { ToolChoice } from './Toolbar';
@@ -249,25 +249,22 @@ export function AnnotationCanvas({
         ])
       : sourceBounds;
   const { imageObj, decodeFailed, retryDecode } = useDecodedImage(image?.dataUrl);
-  const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
+  const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, scale: 1 });
+  /**
+   * The latest viewport, ahead of `viewport` while a frame is pending. Every pan, wheel, command,
+   * fit and reveal reads and writes this, so operations compose in the order they arrive.
+   */
   const viewportRef = useRef(viewport);
-  /** A pointer pan writes `viewportRef` immediately and commits it to state once per frame. */
-  const panFrame = useRef<number | null>(null);
-  const wheelFrame = useRef<number | null>(null);
-  const pendingWheel = useRef<
-    | (
-        | { kind: 'pan'; dx: number; dy: number }
-        | { kind: 'zoom'; pointer: { x: number; y: number }; factor: number }
-      )[]
-    | null
-  >(null);
+  /** Pointer pan and wheel input render at most once per animation frame. */
+  const viewportFrame = useRef<number | null>(null);
   /** True once the user pans or zooms; a resize then preserves their view instead of refitting. */
   const userAdjustedViewport = useRef(false);
   const viewportLayout = useRef<{ filename: string; dataUrl: string; size: ViewportSize } | null>(null);
   const nudgeBurst = useRef<NudgeBurst | null>(null);
   const keyboardHelpId = useId();
   const [spaceHeld, setSpaceHeld] = useState(false);
-  const pan = useRef<{ x: number; y: number; originX: number; originY: number } | null>(null);
+  /** The pointer position a pan last applied; each move pans the latest viewport by the difference. */
+  const pan = useRef<{ x: number; y: number } | null>(null);
   const [editing, setEditing] = useState<EditingText | null>(null);
   const capturedPointer = useRef<number | null>(null);
   // Completion can emit both a shape/stage pointerclick and a compatibility tap.
@@ -300,20 +297,35 @@ export function AnnotationCanvas({
     });
   }, []);
 
-  /** Commits a frame-pending pan now, so the gesture's last movement is never dropped. */
-  const flushPanFrame = useCallback(() => {
-    if (panFrame.current === null) return;
-    cancelAnimationFrame(panFrame.current);
-    panFrame.current = null;
-    setViewport(viewportRef.current);
+  /** Records the latest viewport now and renders it at most once per animation frame. */
+  const scheduleViewport = useCallback((next: Viewport) => {
+    viewportRef.current = next;
+    if (viewportFrame.current !== null) return;
+    viewportFrame.current = requestAnimationFrame(() => {
+      viewportFrame.current = null;
+      setViewport(viewportRef.current);
+    });
   }, []);
+
+  /** Renders a viewport now. Derive it from `viewportRef` so it includes input still waiting for its frame. */
+  const commitViewport = useCallback((next: Viewport) => {
+    if (viewportFrame.current !== null) cancelAnimationFrame(viewportFrame.current);
+    viewportFrame.current = null;
+    viewportRef.current = next;
+    setViewport(next);
+  }, []);
+
+  /** Renders frame-pending pan or wheel input now, so a gesture's last movement is never dropped. */
+  const flushViewportFrame = useCallback(() => {
+    if (viewportFrame.current !== null) commitViewport(viewportRef.current);
+  }, [commitViewport]);
 
   useEffect(
     () => () => {
       if (draftFrame.current !== null) cancelAnimationFrame(draftFrame.current);
-      if (panFrame.current !== null) cancelAnimationFrame(panFrame.current);
+      if (viewportFrame.current !== null) cancelAnimationFrame(viewportFrame.current);
       draftFrame.current = null;
-      panFrame.current = null;
+      viewportFrame.current = null;
     },
     [],
   );
@@ -377,18 +389,11 @@ export function AnnotationCanvas({
     transformer?.getLayer()?.batchDraw();
   }, [cropping, cropBox, draft, imageObj]);
 
-  useEffect(() => {
-    // A pan frame still pending holds newer input than this committed state.
-    if (panFrame.current === null) viewportRef.current = viewport;
-  }, [viewport]);
-
   useLayoutEffect(
     () => () => {
-      if (wheelFrame.current !== null) cancelAnimationFrame(wheelFrame.current);
-      wheelFrame.current = null;
-      pendingWheel.current = null;
-      if (panFrame.current !== null) cancelAnimationFrame(panFrame.current);
-      panFrame.current = null;
+      // Input for the previous screenshot is dropped; the layout effect below refits the next one.
+      if (viewportFrame.current !== null) cancelAnimationFrame(viewportFrame.current);
+      viewportFrame.current = null;
     },
     [image?.filename, image?.dataUrl],
   );
@@ -416,13 +421,11 @@ export function AnnotationCanvas({
       if (shiftX || shiftY) {
         userAdjustedViewport.current = true;
         const scale = viewportRef.current.scale;
-        const next = {
+        commitViewport({
           ...viewportRef.current,
           x: viewportRef.current.x - shiftX,
           y: viewportRef.current.y - shiftY,
-        };
-        viewportRef.current = next;
-        setViewport(next);
+        });
         active.node.position({
           x: active.node.x() + shiftX / scale,
           y: active.node.y() + shiftY / scale,
@@ -431,7 +434,7 @@ export function AnnotationCanvas({
       }
       edgePanFrame.current = requestAnimationFrame(runEdgePan);
     },
-    [size, stopEdgePan],
+    [commitViewport, size, stopEdgePan],
   );
 
   const startEdgePan = useCallback(() => {
@@ -524,9 +527,8 @@ export function AnnotationCanvas({
       sameImage && userAdjustedViewport.current,
     );
     viewportLayout.current = { filename: image.filename, dataUrl: image.dataUrl, size };
-    viewportRef.current = next;
-    setViewport(next);
-  }, [image, size, sourceBounds.x, sourceBounds.y, sourceBounds.width, sourceBounds.height]);
+    commitViewport(next);
+  }, [commitViewport, image, size, sourceBounds.x, sourceBounds.y, sourceBounds.width, sourceBounds.height]);
 
   useEffect(() => {
     const container = stageRef.current?.container();
@@ -535,19 +537,21 @@ export function AnnotationCanvas({
       const command = canvasCommandFromEvent(event);
       if (!command) return;
       userAdjustedViewport.current = command !== 'fit';
-      setViewport((current) => {
-        const next = viewportForCanvasCommand(current, command, size, {
-          width: sourceBounds.width,
-          height: sourceBounds.height,
-        });
-        return command === 'fit' || command === 'actual-size'
-          ? { ...next, x: next.x - sourceBounds.x * next.scale, y: next.y - sourceBounds.y * next.scale }
-          : next;
+      // Start from the latest viewport, including a pan or wheel frame still waiting to render.
+      const next = viewportForCanvasCommand(viewportRef.current, command, size, {
+        width: sourceBounds.width,
+        height: sourceBounds.height,
       });
+      commitViewport(
+        command === 'fit' || command === 'actual-size'
+          ? { ...next, x: next.x - sourceBounds.x * next.scale, y: next.y - sourceBounds.y * next.scale }
+          : next,
+      );
     };
     container.addEventListener(CANVAS_COMMAND_EVENT, handleCommand);
     return () => container.removeEventListener(CANVAS_COMMAND_EVENT, handleCommand);
   }, [
+    commitViewport,
     image,
     imageObj,
     size,
@@ -588,12 +592,11 @@ export function AnnotationCanvas({
         size,
       );
       revealedMatch.current = key;
-      viewportRef.current = next;
-      setViewport(next);
+      commitViewport(next);
     };
     frame = requestAnimationFrame(reveal);
     return () => cancelAnimationFrame(frame);
-  }, [revealAnnotationId, annotations, image, imageObj, size, stageRef]);
+  }, [commitViewport, revealAnnotationId, annotations, image, imageObj, size, stageRef]);
 
   const [pixelationCache] = useState(createPixelationCache);
   // Only a region whose image, bounds or block size changed is rebuilt; drawing a draft rebuilds just its own.
@@ -622,7 +625,10 @@ export function AnnotationCanvas({
   useEffect(() => {
     const transformer = transformerRef.current;
     if (!transformer) return;
-    const selected = transformer.getStage()?.findOne(`#${selectedId ?? ''}`);
+    // A bare `#` selector would match every node without an id, starting with the screenshot layer.
+    const selected = selectedId
+      ? transformer.getStage()?.findOne((node: Konva.Node) => node.id() === selectedId)
+      : undefined;
     transformer.nodes(selected ? [selected] : []);
     transformer.getLayer()?.batchDraw();
   }, [annotations, selectedId]);
@@ -722,7 +728,7 @@ export function AnnotationCanvas({
   function abortPointerInteraction(event?: Event) {
     finalizePointerInteraction(event);
     pan.current = null;
-    flushPanFrame();
+    flushViewportFrame();
     replaceDraft(null);
   }
 
@@ -808,8 +814,7 @@ export function AnnotationCanvas({
     const stage = event.target.getStage();
     if (event.evt.button === 1 || spaceHeld || (tool === 'select' && event.target === stage)) {
       event.evt.preventDefault();
-      if (pointer)
-        pan.current = { ...pointer, originX: viewportRef.current.x, originY: viewportRef.current.y };
+      if (pointer) pan.current = pointer;
       return;
     }
     if (event.evt.button !== 0 || event.target.getParent()?.className === 'Transformer') return;
@@ -838,18 +843,11 @@ export function AnnotationCanvas({
     const pointer = localPointer(event.evt);
     if (pointer) pointerPosition.current = pointer;
     if (pan.current && pointer) {
-      const next = {
-        ...viewportRef.current,
-        x: pan.current.originX + pointer.x - pan.current.x,
-        y: pan.current.originY + pointer.y - pan.current.y,
-      };
+      const latest = viewportRef.current;
+      const from = pan.current;
+      pan.current = pointer;
       userAdjustedViewport.current = true;
-      viewportRef.current = next;
-      if (panFrame.current === null)
-        panFrame.current = requestAnimationFrame(() => {
-          panFrame.current = null;
-          setViewport(viewportRef.current);
-        });
+      scheduleViewport({ ...latest, x: latest.x + pointer.x - from.x, y: latest.y + pointer.y - from.y });
       return;
     }
     const current = draftRef.current;
@@ -895,7 +893,7 @@ export function AnnotationCanvas({
     if (wasDragging) return;
     if (pan.current) {
       pan.current = null;
-      flushPanFrame();
+      flushViewportFrame();
       return;
     }
     // The latest pointer input, including any move still waiting for its frame.
@@ -1288,32 +1286,18 @@ export function AnnotationCanvas({
           }}
           onWheel={(event) => {
             event.evt.preventDefault();
-            const pending = (pendingWheel.current ??= []);
+            // Each event applies, with its own zoom clamp, on top of the latest viewport.
+            const latest = viewportRef.current;
+            let next: Viewport;
             if (event.evt.ctrlKey || event.evt.metaKey) {
               const pointer = event.target.getStage()?.getPointerPosition();
               if (!pointer) return;
-              pending.push({ kind: 'zoom', pointer, factor: Math.exp(-event.evt.deltaY * 0.01) });
+              next = zoomAt(latest, pointer, Math.exp(-event.evt.deltaY * 0.01));
             } else {
-              pending.push({ kind: 'pan', dx: event.evt.deltaX, dy: event.evt.deltaY });
+              next = { ...latest, x: latest.x - event.evt.deltaX, y: latest.y - event.evt.deltaY };
             }
             userAdjustedViewport.current = true;
-            if (wheelFrame.current === null) {
-              wheelFrame.current = requestAnimationFrame(() => {
-                wheelFrame.current = null;
-                const input = pendingWheel.current;
-                pendingWheel.current = null;
-                if (!input) return;
-                setViewport((current) =>
-                  input.reduce(
-                    (viewport, operation) =>
-                      operation.kind === 'pan'
-                        ? { ...viewport, x: viewport.x - operation.dx, y: viewport.y - operation.dy }
-                        : zoomAt(viewport, operation.pointer, operation.factor),
-                    current,
-                  ),
-                );
-              });
-            }
+            scheduleViewport(next);
           }}
           onPointerClick={(event) => {
             if (createdInPointerGesture.current) return;

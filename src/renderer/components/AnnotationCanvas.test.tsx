@@ -3,6 +3,7 @@ import Konva from 'konva';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Annotation } from '../../shared/types';
+import { dispatchCanvasCommand } from '../canvas/commands';
 import { zoomAt } from '../viewport';
 import { AnnotationCanvas } from './AnnotationCanvas';
 import type { ToolChoice } from './Toolbar';
@@ -706,4 +707,92 @@ test('a pixelate draft rebuilds only its own region per frame and releases the r
   expect(live[0]).toBe(region);
   expectSameRegions(pixelRegions(f.stage, pixelations), before);
   expect(before.every((canvas) => canvas.width === 200 && canvas.height === 150)).toBe(true);
+});
+
+function transformedNodes(stage: Konva.Stage) {
+  return stage.find('Transformer').flatMap((node) => (node as Konva.Transformer).nodes());
+}
+
+test('the select tool attaches no transformer while nothing is selected', () => {
+  // The onboarding Annotate step mounts this same canvas with the select tool and no selection.
+  const f = mountCanvas('select', [existingRectangle]);
+  expect(f.stage.find('Transformer')).toHaveLength(1);
+  expect(transformedNodes(f.stage)).toEqual([]);
+  vi.spyOn(f.stage, 'getIntersection').mockReturnValue(
+    f.stage.findOne(`#${existingRectangle.id}`) as Konva.Shape,
+  );
+  f.pointer('pointerdown', 240, 240);
+  f.pointer('pointerup', 240, 240);
+  expect(f.selected()).toBe(existingRectangle.id);
+  expect(transformedNodes(f.stage).map((node) => node.id())).toEqual([existingRectangle.id]);
+  act(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  });
+  expect(f.selected()).toBeNull();
+  expect(transformedNodes(f.stage)).toEqual([]);
+});
+
+function viewportState(canvas: HTMLElement) {
+  return { ...viewportOf(canvas), scale: Number(canvas.dataset.imageScale) };
+}
+
+test('actual size during a pending pan frame keeps 100% and later movement pans from it', () => {
+  const f = mountCanvas('select');
+  const frames = controlFrames();
+  expect(viewportState(f.canvas).scale).not.toBe(1);
+  f.pointer('pointerdown', 600, 400);
+  f.pointer('pointermove', 620, 410);
+  act(() => dispatchCanvasCommand(f.stage, 'actual-size'));
+  const actual = viewportState(f.canvas);
+  expect(actual.scale).toBe(1);
+  frames.run();
+  expect(viewportState(f.canvas)).toEqual(actual);
+  f.pointer('pointermove', 650, 430);
+  frames.run();
+  expect(viewportState(f.canvas)).toEqual({ x: actual.x + 30, y: actual.y + 20, scale: 1 });
+  f.pointer('pointerup', 650, 430);
+  expect(frames.pending()).toEqual([]);
+});
+
+test('zooming in during a pending pan frame zooms the panned view', () => {
+  const f = mountCanvas('select');
+  const frames = controlFrames();
+  const start = viewportState(f.canvas);
+  f.pointer('pointerdown', 600, 400);
+  f.pointer('pointermove', 620, 410);
+  act(() => dispatchCanvasCommand(f.stage, 'zoom-in'));
+  frames.run();
+  const expected = zoomAt({ ...start, x: start.x + 20, y: start.y + 10 }, { x: 450, y: 300 }, 1.1);
+  const actual = viewportState(f.canvas);
+  expect(actual.scale).toBeCloseTo(expected.scale);
+  expect(actual.x).toBeCloseTo(expected.x);
+  expect(actual.y).toBeCloseTo(expected.y);
+});
+
+test('a ctrl-wheel zoom queued before a pan move in the same frame is kept', () => {
+  const f = mountCanvas('select');
+  const frames = controlFrames();
+  const start = viewportState(f.canvas);
+  f.pointer('pointerdown', 600, 400);
+  act(() => {
+    f.stage.content.dispatchEvent(
+      new WheelEvent('wheel', {
+        bubbles: true,
+        cancelable: true,
+        ctrlKey: true,
+        deltaY: -10,
+        clientX: 100,
+        clientY: 150,
+      }),
+    );
+  });
+  f.pointer('pointermove', 620, 410);
+  frames.run();
+  const zoomed = zoomAt(start, { x: 100, y: 150 }, Math.exp(0.1));
+  const actual = viewportState(f.canvas);
+  expect(actual.scale).toBeCloseTo(zoomed.scale);
+  expect(actual.x).toBeCloseTo(zoomed.x + 20);
+  expect(actual.y).toBeCloseTo(zoomed.y + 10);
+  f.pointer('pointerup', 620, 410);
+  expect(viewportState(f.canvas)).toEqual(actual);
 });
