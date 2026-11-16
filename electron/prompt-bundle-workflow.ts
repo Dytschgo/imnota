@@ -27,7 +27,8 @@ import { decodePngDataUrl, maxPngDataUrlLength, PNG_DATA_URL_PREFIX } from './pn
 import { formatTerminalHandoff, TerminalPathError } from '../src/shared/terminal-handoff.js';
 
 const MAX_PNG_DATA_URL_CHARACTERS = maxPngDataUrlLength(MAX_PROMPT_BUNDLE_PNG_BYTES);
-const MAX_FINALIZED_GRANTS = 128;
+/** Finalized sessions whose read/copy grants stay available, oldest finalization evicted first. */
+export const DEFAULT_MAX_FINALIZED_GRANTS = 128;
 
 export interface AuthorizedPromptCollection {
   projectPath: string;
@@ -142,13 +143,26 @@ async function readBoundedRegularFile(
   }
 }
 
+export interface PromptBundleWorkflowOptions {
+  /** Defaults to {@link DEFAULT_MAX_FINALIZED_GRANTS}; tests lower it to exercise eviction cheaply. */
+  maxFinalizedGrants?: number;
+}
+
 export class PromptBundleWorkflow {
   private readonly grants = new Map<string, SessionGrant>();
+
+  private readonly maxFinalizedGrants: number;
 
   constructor(
     private readonly dependencies: PromptBundleWorkflowDependencies,
     private readonly store: PromptBundleStore,
-  ) {}
+    options: PromptBundleWorkflowOptions = {},
+  ) {
+    const { maxFinalizedGrants = DEFAULT_MAX_FINALIZED_GRANTS } = options;
+    if (!Number.isInteger(maxFinalizedGrants) || maxFinalizedGrants < 1)
+      throw new RangeError('maxFinalizedGrants must be a positive integer.');
+    this.maxFinalizedGrants = maxFinalizedGrants;
+  }
 
   async start(
     projectPath: string,
@@ -397,7 +411,7 @@ export class PromptBundleWorkflow {
     });
     let finalizedCount = 0;
     for (const grant of this.grants.values()) if (grant.phase === 'final') finalizedCount++;
-    if (finalizedCount > MAX_FINALIZED_GRANTS) {
+    if (finalizedCount > this.maxFinalizedGrants) {
       for (const [storedSessionId, grant] of this.grants) {
         if (grant.phase !== 'final') continue;
         this.grants.delete(storedSessionId);

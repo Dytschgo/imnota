@@ -9,7 +9,11 @@ import {
   PromptBundleStore,
 } from './prompt-bundle-store.js';
 import { workflowOutcome } from './workflow-errors.js';
-import { promptCollectionGrant, PromptBundleWorkflow } from './prompt-bundle-workflow.js';
+import {
+  DEFAULT_MAX_FINALIZED_GRANTS,
+  promptCollectionGrant,
+  PromptBundleWorkflow,
+} from './prompt-bundle-workflow.js';
 import { TemporaryFileHandoffStore } from './onboarding-handoff.js';
 import { promptBundleId } from './prompt-bundle-identity.js';
 import { createMcpTools, handleMcpJsonRpc } from './mcp-server.js';
@@ -343,6 +347,7 @@ describe('main-owned prompt bundle grants', () => {
   });
 
   it('caps grants by finalization order while retaining a long-running session that finishes last', async () => {
+    const maxFinalizedGrants = 3;
     const projectPath = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-grants-')));
     temporary.push(projectPath);
     const collectionId = '001-collection';
@@ -366,10 +371,11 @@ describe('main-owned prompt bundle grants', () => {
         now: () => new Date(2026, 8, 7, 12, 0, 0),
         validateDecodedPng: () => undefined,
       }),
+      { maxFinalizedGrants },
     );
     const held = await workflow.start(projectPath, collectionId, manifest);
     let earliestFinalizedSessionId = '';
-    for (let index = 0; index < 128; index++) {
+    for (let index = 0; index < maxFinalizedGrants; index++) {
       const session = await workflow.start(projectPath, collectionId, manifest);
       if (index === 0) earliestFinalizedSessionId = session.sessionId;
       await workflow.cancel(session.sessionId);
@@ -378,8 +384,16 @@ describe('main-owned prompt bundle grants', () => {
 
     await expect(workflow.cancel(earliestFinalizedSessionId)).rejects.toThrow(/not found|closed/);
     await expect(workflow.cancel(held.sessionId)).resolves.toEqual(heldResult);
-    // This exercises 129 real filesystem sessions, including Windows file operations.
-  }, 30_000);
+    // Real filesystem sessions, including Windows file operations, with a small injected cap.
+  });
+
+  it('retains 128 finalized grants in production and rejects an invalid cap', () => {
+    expect(DEFAULT_MAX_FINALIZED_GRANTS).toBe(128);
+    const store = new PromptBundleStore({ validateDecodedPng: () => undefined });
+    const dependencies = {} as ConstructorParameters<typeof PromptBundleWorkflow>[0];
+    for (const maxFinalizedGrants of [0, -1, 1.5, Number.NaN])
+      expect(() => new PromptBundleWorkflow(dependencies, store, { maxFinalizedGrants })).toThrow(RangeError);
+  });
 });
 
 it('reports exact grant errors and directs text-only image/file copies to Copy Markdown only', async () => {

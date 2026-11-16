@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import { decodePngDataUrl, isPngDataUrl, maxPngDataUrlLength, PNG_DATA_URL_PREFIX } from './png-data-url.js';
 
