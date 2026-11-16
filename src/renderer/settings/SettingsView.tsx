@@ -16,6 +16,7 @@ import type { EffectiveAppearance } from '../app/useAppearance';
 import { Button } from '../components/ui';
 import { UpdateControl } from '../components/UpdateControl';
 import { WhatsNewSettings, type WhatsNewAction } from '../components/WhatsNew';
+import { useShallow } from 'zustand/react/shallow';
 import { useAppStore } from '../store';
 import { AppearanceSettings } from './AppearanceSettings';
 import { OnboardingSettings } from './OnboardingSettings';
@@ -121,7 +122,9 @@ export function SettingsView({
   onWhatsNewAction = () => undefined,
   onWorkspaceChanged,
 }: SettingsViewProps) {
-  const { settings, set } = useAppStore();
+  const { settings, set } = useAppStore(
+    useShallow((state) => ({ settings: state.settings, set: state.set })),
+  );
   const [workspaceSettingError, setWorkspaceSettingError] = useState('');
   const [uncontrolledCategory, setUncontrolledCategory] = useState<SettingsCategory>('Appearance');
   const group = activeCategory ?? uncontrolledCategory;
