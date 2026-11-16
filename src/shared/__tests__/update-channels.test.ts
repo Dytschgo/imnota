@@ -418,6 +418,29 @@ it('invalidates a cached candidate when background native preparation fails', as
   await expect(instance.download()).rejects.toThrow('No update is available');
   expect(ops.download).not.toHaveBeenCalled();
 });
+it('shows a preparation refusal such as an unsupported Intel Mac instead of offering the update', async () => {
+  for (const background of [false, true]) {
+    const { instance, ops } = controller();
+    ops.prepare.mockRejectedValueOnce(
+      new UpdateFailure('Imnota 0.3.0 needs a Mac with Apple silicon. Intel Macs are no longer supported.'),
+    );
+
+    await instance.check({ background });
+
+    expect(instance.getStatus()).toMatchObject({
+      state: 'error',
+      message:
+        'Imnota 0.3.0 needs a Mac with Apple silicon. Intel Macs are no longer supported. Your projects are unchanged.',
+    });
+    await expect(instance.download()).rejects.toThrow('No update is available');
+    expect(ops.download).not.toHaveBeenCalled();
+  }
+  // Discovery failures keep the generic connection guidance, even when they carry a message.
+  const { instance, ops } = controller();
+  ops.discover.mockRejectedValueOnce(new UpdateFailure('internal detail'));
+  await instance.check();
+  expect(instance.getStatus().message).toMatch(/^Could not check this channel/);
+});
 it('turns a joined background check into a manual check and reports its failure', async () => {
   const { instance, ops } = controller();
   let reject!: (reason?: unknown) => void;

@@ -19,7 +19,7 @@ The user authorized implementation and a new PR on 2026-09-08. Current main alre
 - Browser pairing has no upload-status subscription contract. The page directs users to Imnota for actual progress and the resulting link instead of claiming to detect upload/consumption.
 - Manual cleanup, a persistent operational audit/event log, and owner session-level pairing revocation require additional backend contracts. The console must expose only supported data/actions and explain configured retention.
 
-Validation and remaining coverage are recorded in `../ui-overhaul/implementation.md`. The existing Imnota logo from `../../build/icon.svg` is reused on the public service pages; concept imagery is not a replacement identity. No merge or production deployment is authorized by this PR request.
+Validation and remaining coverage are recorded in `ui-overhaul/implementation.md`. The existing Imnota logo from `../../build/icon.svg` is reused on the public service pages; concept imagery is not a replacement identity. No merge or production deployment is authorized by this PR request.
 
 ## Outcome
 
@@ -350,9 +350,9 @@ The redesign is not complete until these states have an intentional visual treat
 
 Three GPT Image concepts were generated for direction-setting and copied into the repository:
 
-- [Workbench concept](../ui-overhaul/imnota-workbench-concept.png) — a stronger evidence/context/hand-off relationship inside the desktop app. Use it to discuss hierarchy, the persistent prompt preview, and inspector composition.
-- [Public hero concept](../ui-overhaul/imnota-public-hero-concept.png) — a compact marketing composition showing annotation evidence flowing into a prompt bundle. Use it to discuss the public first viewport and the annotation-to-handoff visual motif.
-- [Owner console concept](../ui-overhaul/imnota-owner-console-concept.png) — a dense but calm shares/health/storage operator view. Use it to discuss tables, status strips, drawers, and safe operational actions.
+- [Workbench concept](ui-overhaul/imnota-workbench-concept.png) — a stronger evidence/context/hand-off relationship inside the desktop app. Use it to discuss hierarchy, the persistent prompt preview, and inspector composition.
+- [Public hero concept](ui-overhaul/imnota-public-hero-concept.png) — a compact marketing composition showing annotation evidence flowing into a prompt bundle. Use it to discuss the public first viewport and the annotation-to-handoff visual motif.
+- [Owner console concept](ui-overhaul/imnota-owner-console-concept.png) — a dense but calm shares/health/storage operator view. Use it to discuss tables, status strips, drawers, and safe operational actions.
 
 These are concept comps, not product screenshots. Their generated labels, dates, counts, and UI copy are synthetic. Production pages should use real Imnota screenshots or real data-driven components. The existing anime-style backdrop files in `public/backdrops/` should not be used for the public site or owner console; they are unrelated to the product’s evidence-first visual language.
 

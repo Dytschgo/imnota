@@ -193,8 +193,10 @@ This establishes replacement-process readiness, not renderer/UI health or a runt
 version handshake. The updater separately validates the installed release version;
 `ps` does not report the version running inside Electron.
 
-Run `node --test scripts/install.test.mjs` for synthetic releases, hostile metadata
-and download failures. The suite executes the real scripts with network and app
+Run `node --test scripts/install.linux.test.mjs scripts/install.macos.test.mjs scripts/install.windows.test.mjs`
+for synthetic releases, hostile metadata and download failures. Each platform has
+its own file, sharing `scripts/test-support/install-harness.mjs`, so `node --test`
+runs them in parallel. The suite executes the real scripts with network and app
 launch commands replaced. Git Bash on Windows exercises shell control flow; it
 does not replace native Linux or macOS installation evidence. No fixture launches
 a real installer or changes a personal installation.
@@ -281,7 +283,7 @@ The atomic writer SHA-256 hashes binary writes through a private buffer of at mo
 
 ## Packaged native failure verification
 
-The existing smoke launcher has a closed `faults` mode. The packaged wrappers accept an explicit `--faults` option and run all 12 fixed case sets serially against the supplied Windows portable, macOS archive or Linux AppImage. Recovery lineage is partitioned by EIO, EACCES and EPERM; the catalog contains 35 cases. The wrappers call `scripts/smoke.mjs`; its imported catalog helper awaits the existing `runNativeVerification` directly for each partition, without an intermediate Node launcher or a second process supervisor. Each case logs its start and successful completion. Every application child retains the existing six-minute limit and native operations retain their 15-second limit. There is no automatic retry or partial-group acceptance.
+The existing smoke launcher has a closed `faults` mode. The packaged wrappers accept an explicit `--faults` option and run all 8 fixed case sets serially against the supplied Windows portable, macOS archive or Linux AppImage. The catalog contains 35 cases. `restore-errno` and `recovery-lineage-errno` each run their EIO, EACCES and EPERM variants in one launch as distinct cases such as `drawing-eacces` or `foreign-eperm`. Main binds the errno when it arms each case and records every injection with its case and errno. The app and the outer launcher both reject a case whose `case.json` lacks exactly one arm and disarm, or whose injections came from another case or used another errno. Before this, each errno ran as its own set in a separate launch (12 launches). The wrappers call `scripts/smoke.mjs`; its imported catalog helper awaits the existing `runNativeVerification` directly for each partition, without an intermediate Node launcher or a second process supervisor. Each case logs its start and successful completion. Every application child retains the existing six-minute limit and native operations retain their 15-second limit. There is no automatic retry or partial-group acceptance.
 
 Use this capability only after independent review of its complete source and an explicit native execution grant for the exact candidate. Local invocation requires `IMNOTA_FAULT_GRANT`, the expected version and a fresh absolute `IMNOTA_SMOKE_ARTIFACT_DIR`; the wrapper binds the checkout SHA/tree and measured package, executable and asar hashes. The source mapping is a build declaration supported by the reviewed checkout/build record, not cryptographic proof that a binary was compiled from that source. CI records its run/attempt as the grant identifier after reviewed source is pushed.
 

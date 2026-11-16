@@ -9,6 +9,7 @@ import { copyProjectForDuplicate } from './project-duplicate.js';
 import { listWorkspaceProjects } from './project-list.js';
 import { listRecentlyDeleted } from './recently-deleted.js';
 import { createTemplateProject } from './template-project.js';
+import { withinProjectCreationQueue } from './project-creation-queue.js';
 import { app, dialog, shell } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -28,7 +29,6 @@ export function registerProjectIpc(router: IpcRouter, host: IpcHost): void {
     readProject,
     readProjectMutationBaseline,
     uniqueProjectFolder,
-    withinProjectCreationQueue,
     workspaceOrThrow,
   } = host;
   handle('projects:list', async () => {

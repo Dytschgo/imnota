@@ -1,3 +1,4 @@
+// @vitest-environment node
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -171,7 +172,7 @@ describe('owned real-filesystem fault boundary', () => {
     async (reason) => {
       const value = await fixture();
       const controller = new OwnedSmokeFaultController(
-        { ...value.proof, caseSet: 'restore-eio' },
+        { ...value.proof, caseSet: 'restore-errno' },
         value.root,
       );
       const token = `delete-${randomUUID()}`;
@@ -180,7 +181,7 @@ describe('owned real-filesystem fault boundary', () => {
       const manifest = { token, phase: 'deleted', screenshot: { id: 'shot_fixture' } };
       await fs.writeFile(path.join(journal, 'manifest.json'), JSON.stringify(manifest));
       await controller.arm({
-        caseId: 'screenshot',
+        caseId: 'screenshot-eio',
         projectPath: value.project,
         projectId: value.id,
         token,
@@ -271,6 +272,71 @@ describe('owned real-filesystem fault boundary', () => {
       controller.events.filter((event) => event.event === 'consumed').map((event) => event.fault),
     ).toEqual(['metadata', 'marker']);
     expect(() => controller.assertHealthy()).not.toThrow();
+  });
+  function combinedErrnoController(value: Awaited<ReturnType<typeof fixture>>) {
+    const controller = new OwnedSmokeFaultController(
+      { ...value.proof, caseSet: 'recovery-lineage-errno' },
+      value.root,
+    );
+    // No renderer window in unit tests; disarm acknowledges through the real command path otherwise.
+    vi.spyOn(controller, 'command').mockResolvedValue({} as Awaited<ReturnType<typeof controller.command>>);
+    return controller;
+  }
+  it('injects each combined errno only for its own armed case and nothing after disarm', async () => {
+    const value = await fixture();
+    const controller = combinedErrnoController(value);
+    const commit = (name: string) =>
+      controller.invoke('workflow:project-watch:cas', [{ projectPath: value.project }], () =>
+        atomicWrite(
+          value.target,
+          JSON.stringify({ id: value.id, name }),
+          undefined,
+          controller.atomicVerification(value.target),
+        ),
+      );
+    const sequence = [
+      ['healthy-eacces', 'EACCES'],
+      ['foreign-eperm', 'EPERM'],
+      ['healthy-eio', 'EIO'],
+    ] as const;
+    for (const [caseId, code] of sequence) {
+      await controller.arm({ caseId, projectPath: value.project, projectId: value.id });
+      await expect(commit(caseId)).rejects.toMatchObject({ committed: true, code });
+      await controller.disarm(['commit-workflow:project-watch:cas']);
+      expect(controller.atomicVerification(value.target)).toBeUndefined();
+      // Between cases an ordinary write must neither fail nor record an injection.
+      await commit(`${caseId}-between`);
+      expect(JSON.parse(await fs.readFile(value.target, 'utf8')).name).toBe(`${caseId}-between`);
+    }
+    expect(
+      controller.events
+        .filter((event) => event.event === 'armed' || event.event === 'injected')
+        .map((event) => [event.event, event.caseId, event.errno]),
+    ).toEqual(
+      sequence.flatMap(([caseId, code]) => [
+        ['armed', caseId, code],
+        ['injected', caseId, code],
+      ]),
+    );
+    expect(() => controller.assertHealthy()).not.toThrow();
+    await expect(
+      controller.arm({ caseId: 'healthy-enoent', projectPath: value.project, projectId: value.id }),
+    ).rejects.toThrow('outside the fixed catalog');
+  });
+  it('refuses to inject one case errno from a write verified before the next case was armed', async () => {
+    const value = await fixture();
+    const controller = combinedErrnoController(value);
+    await controller.arm({ caseId: 'healthy-eio', projectPath: value.project, projectId: value.id });
+    await expect(
+      controller.invoke('workflow:project-watch:cas', [{ projectPath: value.project }], async () => {
+        const stale = controller.atomicVerification(value.target);
+        await controller.disarm([]);
+        await controller.arm({ caseId: 'healthy-eacces', projectPath: value.project, projectId: value.id });
+        return atomicWrite(value.target, JSON.stringify({ id: value.id, name: 'stale' }), undefined, stale);
+      }),
+    ).rejects.toThrow();
+    expect(() => controller.assertHealthy()).toThrow('outlived its armed case');
+    expect(controller.events.some((event) => event.event === 'injected')).toBe(false);
   });
 });
 

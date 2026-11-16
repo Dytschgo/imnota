@@ -532,7 +532,13 @@ trap 'rm -rf "$root"' EXIT
 mkdir "$root/Imnota.app"
 require_macos() { :; }
 plist_value() { if [[ "$2" == CFBundleIdentifier ]]; then printf com.dytschgo.imnota; else printf 1.2.3; fi; }
-download_file() { printf archive > "$2"; }
+download_file() {
+  if [[ "$1" == */SHA256SUMS.txt ]]; then
+    echo "$(printf '%064d' 0)  Imnota-1.2.3-universal-mac.zip" > "$2"
+  else
+    printf archive > "$2"
+  fi
+}
 read_expected_checksum() { EXPECTED_CHECKSUM=test; }
 sha256_file() { printf test; }
 validate_archive_entries() { :; }
@@ -760,7 +766,8 @@ chmod 644 "$root/source/Imnota.app/Contents/Info.plist"
 /usr/bin/ditto -c -k --keepParent "$root/source/Imnota.app" "$root/app.zip"
 # Base b30a2d5 used this ditto invocation and inherited the caller's mask.
 /usr/bin/ditto -x -k "$root/app.zip" "$root/base-extracted"
-download_file() { cp "$root/app.zip" "$2"; }
+eval "$(declare -f download_file | sed '1s/download_file/fixture_download_file/')"
+download_file() { if [[ "$1" == */SHA256SUMS.txt ]]; then fixture_download_file "$@"; else cp "$root/app.zip" "$2"; fi; }
 compare_bundle_modes() {
   local candidate=$1 relative
   for relative in '' /Contents /Contents/MacOS /Contents/MacOS/Imnota /Contents/Info.plist; do
@@ -826,6 +833,36 @@ test('accepts exact stable and nightly release contracts', { skip: !bash }, () =
     );
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout, `${version}|Imnota-${version}-universal-mac.zip`);
+    for (const architecture of ['arm64', 'universal']) {
+      const selected = runBash(
+        'validate_release_contract "$2" "$3" "$4"; printf "%s|%s" "$ARCHIVE_NAME" "$ARCHIVE_ARCHITECTURE"',
+        [tag, `${root}/Imnota-${version}-${architecture}-mac.zip`, `${root}/SHA256SUMS.txt`],
+      );
+      assert.equal(selected.status, 0, selected.stderr);
+      assert.equal(selected.stdout, `Imnota-${version}-${architecture}-mac.zip|${architecture}`);
+    }
+  }
+});
+
+test('accepts only the two official macOS archive names for the exact release', { skip: !bash }, () => {
+  const root = 'https://github.com/Dytschgo/imnota/releases/download/v1.2.3';
+  for (const name of [
+    'Imnota-1.2.3-x64-mac.zip',
+    'Imnota-1.2.3-mac.zip',
+    'Imnota-mac.zip',
+    'Imnota-1.2.4-arm64-mac.zip',
+    'Imnota-1.2.3-arm64-mac.zip.blockmap',
+    'Imnota-1.2.3-arm64.dmg',
+    '../v1.2.3/Imnota-1.2.3-arm64-mac.zip',
+    'Imnota-1.2.3-arm64-mac.zip?x=1',
+  ]) {
+    const result = runBash('validate_release_contract "$2" "$3" "$4"', [
+      'v1.2.3',
+      `${root}/${name}`,
+      `${root}/SHA256SUMS.txt`,
+    ]);
+    assert.notEqual(result.status, 0, `unexpectedly accepted ${name}`);
+    assert.match(result.stderr, /archive URL does not exactly match/);
   }
 });
 
@@ -874,6 +911,195 @@ test('requires one exact checksum entry for the selected archive', { skip: !bash
   );
   assert.notEqual(duplicate.status, 0);
 });
+
+const arm64Entry = `${'a'.repeat(64)}  Imnota-1.2.3-arm64-mac.zip`;
+const universalEntry = `${'b'.repeat(64)}  Imnota-1.2.3-universal-mac.zip`;
+// Each line is written with echo so the fixture needs no escape sequences.
+function selectArchive(lines, requested) {
+  const root = 'https://github.com/Dytschgo/imnota/releases/download/v1.2.3';
+  return runBash(
+    `validate_release_contract v1.2.3 "${root}/Imnota-1.2.3-$2-mac.zip" "${root}/SHA256SUMS.txt"
+tmp=$(mktemp)
+shift 2
+: > "$tmp"
+for line in "$@"; do echo "$line" >> "$tmp"; done
+require_selected_archive "$tmp"
+read_expected_checksum "$tmp" "$ARCHIVE_NAME"
+printf '%s|%s' "$ARCHIVE_NAME" "$EXPECTED_CHECKSUM"
+rm -f "$tmp"`,
+    [requested, ...lines],
+  );
+}
+
+for (const [name, lines, requested, expected] of [
+  [
+    'universal-only release',
+    [universalEntry],
+    'universal',
+    `Imnota-1.2.3-universal-mac.zip|${'b'.repeat(64)}`,
+  ],
+  ['arm64-only release', [arm64Entry], 'arm64', `Imnota-1.2.3-arm64-mac.zip|${'a'.repeat(64)}`],
+  [
+    'both listed prefers arm64',
+    [universalEntry, arm64Entry, `${'c'.repeat(64)}  Imnota-mac.zip`],
+    'arm64',
+    `Imnota-1.2.3-arm64-mac.zip|${'a'.repeat(64)}`,
+  ],
+]) {
+  test(`checksum list selects the macOS archive: ${name}`, { skip: !bash }, () => {
+    const result = selectArchive(lines, requested);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, expected);
+  });
+}
+
+for (const [name, lines, requested, message] of [
+  [
+    'both listed but universal requested',
+    [universalEntry, arm64Entry],
+    'universal',
+    /SHA256SUMS\.txt selects/,
+  ],
+  ['arm64-only release but universal requested', [arm64Entry], 'universal', /SHA256SUMS\.txt selects/],
+  ['universal-only release but arm64 requested', [universalEntry], 'arm64', /SHA256SUMS\.txt selects/],
+  ['neither archive listed', [`${'c'.repeat(64)}  Imnota-mac.zip`], 'universal', /lists no macOS archive/],
+  ['empty checksum list', [], 'arm64', /lists no macOS archive/],
+  ['duplicate arm64 entry', [arm64Entry, arm64Entry, universalEntry], 'arm64', /exactly one checksum/],
+  [
+    'duplicate arm64 entry with different digests',
+    [arm64Entry, `${'d'.repeat(64)}  Imnota-1.2.3-arm64-mac.zip`],
+    'arm64',
+    /exactly one checksum/,
+  ],
+  [
+    'duplicate universal entry beside arm64',
+    [arm64Entry, universalEntry, universalEntry],
+    'arm64',
+    /exactly one checksum/,
+  ],
+  [
+    'malformed entries are never selected',
+    [
+      `${'a'.repeat(64)} Imnota-1.2.3-arm64-mac.zip`,
+      `${'a'.repeat(63)}  Imnota-1.2.3-arm64-mac.zip`,
+      `${'a'.repeat(64)}  *Imnota-1.2.3-universal-mac.zip`,
+      `${'a'.repeat(64)}  Imnota-1.2.3-universal-mac.zip.blockmap`,
+      `${'a'.repeat(64)}  Imnota-1.2.4-arm64-mac.zip`,
+    ],
+    'arm64',
+    /lists no macOS archive/,
+  ],
+]) {
+  test(`checksum list refuses an ambiguous or mismatched archive: ${name}`, { skip: !bash }, () => {
+    const result = selectArchive(lines, requested);
+    assert.notEqual(result.status, 0, result.stdout);
+    assert.match(result.stderr, message);
+  });
+}
+
+for (const [name, hardware, arm64, translated, appleSilicon] of [
+  ['native Apple silicon', 'arm64', '', '', true],
+  ['Rosetta-translated Apple silicon (hw.optional.arm64)', 'x86_64', '1', '0', true],
+  ['Rosetta-translated Apple silicon (proc_translated)', 'x86_64', '', '1', true],
+  ['Intel Mac without the arm64 sysctl', 'x86_64', '', '', false],
+  ['Intel Mac reporting no arm64 support', 'x86_64', '0', '0', false],
+]) {
+  test(`host architecture detection: ${name}`, { skip: !bash }, () => {
+    // An empty sysctl value models a key this Mac does not have (sysctl fails).
+    const stubs = `fake_hardware=$2 fake_arm64=$3 fake_translated=$4
+machine_hardware() { printf %s "$fake_hardware"; }
+sysctl_value() {
+  case "$1" in
+    hw.optional.arm64) [[ -n "$fake_arm64" ]] && printf %s "$fake_arm64" ;;
+    sysctl.proc_translated) [[ -n "$fake_translated" ]] && printf %s "$fake_translated" ;;
+    *) return 1 ;;
+  esac
+}`;
+    const result = runBash(`${stubs}\nhost_is_apple_silicon`, [hardware, arm64, translated]);
+    assert.equal(result.status === 0, appleSilicon, result.stderr);
+
+    const root = 'https://github.com/Dytschgo/imnota/releases/download/v1.2.3';
+    for (const architecture of ['arm64', 'universal']) {
+      const gate = runBash(
+        `${stubs}
+validate_release_contract v1.2.3 "${root}/Imnota-1.2.3-$5-mac.zip" "${root}/SHA256SUMS.txt"
+require_supported_host_architecture`,
+        [hardware, arm64, translated, architecture],
+      );
+      const allowed = appleSilicon || architecture === 'universal';
+      assert.equal(gate.status === 0, allowed, `${architecture}: ${gate.stderr}`);
+      if (!allowed) assert.match(gate.stderr, /Intel Macs are no longer supported/);
+    }
+  });
+}
+
+for (const architecture of ['arm64', 'universal']) {
+  test(
+    `main on an Intel Mac ${architecture === 'arm64' ? 'refuses an arm64-only target before any download, lock or app change' : 'still installs a universal target'}`,
+    { skip: !bash },
+    () => {
+      const result = runBash(
+        `${syntheticMainFixture}
+architecture=$2
+machine_hardware() { printf x86_64; }
+sysctl_value() { return 1; }
+printf old > "$root/Imnota.app/marker"
+eval "$(declare -f download_file | sed '1s/download_file/fixture_download_file/')"
+download_file() {
+  printf '%s\n' "$1" >> "$root/requests"
+  if [[ "$1" == */SHA256SUMS.txt ]]; then
+    echo "$(printf '%064d' 0)  Imnota-1.2.3-$architecture-mac.zip" > "$2"
+  else
+    fixture_download_file "$@"
+  fi
+}
+extract_archive() { mkdir "$2/Imnota.app"; printf new > "$2/Imnota.app/marker"; }
+status=0
+output=$( ( main v1.2.3 \
+  "https://github.com/Dytschgo/imnota/releases/download/v1.2.3/Imnota-1.2.3-$architecture-mac.zip" \
+  https://github.com/Dytschgo/imnota/releases/download/v1.2.3/SHA256SUMS.txt \
+  "$root/Imnota.app" 1.2.3 ) 2>&1 ) || status=$?
+if [[ "$architecture" == arm64 ]]; then
+  [[ "$status" -ne 0 && "$output" == *'Intel Macs are no longer supported'* ]]
+  [[ ! -e "$root/requests" && ! -e "$root/.imnota-update.lock" ]]
+  [[ -z "$(find "$root" -maxdepth 1 -name '.imnota-*' -print)" ]]
+  [[ "$(cat "$root/Imnota.app/marker")" == old ]]
+else
+  [[ "$status" -eq 0 ]] || { printf '%s' "$output" >&2; exit 1; }
+  [[ "$(cat "$root/Imnota.app/marker")" == new ]]
+fi
+printf ok
+`,
+        [architecture],
+      );
+      assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+      assert.equal(result.stdout.endsWith('ok'), true, result.stdout);
+    },
+  );
+}
+
+test(
+  'main refuses a requested archive the checksum list does not select before downloading it',
+  { skip: !bash },
+  () => {
+    const result = runBash(`${syntheticMainFixture}
+printf old > "$root/Imnota.app/marker"
+download_file() {
+  printf '%s\n' "$1" >> "$root/requests"
+  echo "$(printf '%064d' 0)  Imnota-1.2.3-arm64-mac.zip" > "$2"
+}
+status=0
+output=$( ( run_main ) 2>&1 ) || status=$?
+[[ "$status" -ne 0 && "$output" == *'SHA256SUMS.txt selects (Imnota-1.2.3-arm64-mac.zip)'* ]]
+[[ "$(cat "$root/requests")" == */SHA256SUMS.txt ]]
+[[ "$(wc -l < "$root/requests")" -eq 1 ]]
+[[ "$(cat "$root/Imnota.app/marker")" == old ]]
+printf ok
+`);
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.equal(result.stdout.endsWith('ok'), true, result.stdout);
+  },
+);
 
 test('rejects archive traversal and paths outside Imnota.app', { skip: !bash }, () => {
   for (const entry of [
@@ -1283,10 +1509,11 @@ test('compares macOS versions numerically and rejects unreadable versions', { sk
   }
 });
 
-test('verifies each architecture in its own lipo call for current lipo', { skip: !bash }, () => {
+test('verifies the arm64 slice in one lipo call per file for current lipo', { skip: !bash }, () => {
   // Current lipo consumes one arch after -verify_arch and reads a second as
   // another input file; the stub reproduces that parsing so the real
-  // verify_universal_binary body runs against it.
+  // verify_arm64_binary and verify_arm64_executables bodies run against it.
+  // Each fake executable lists its architectures on its second line.
   const result = runBash(`
 stub_dir=$(mktemp -d)
 cat > "$stub_dir/lipo" <<'STUB'
@@ -1294,34 +1521,66 @@ cat > "$stub_dir/lipo" <<'STUB'
 verify=0
 arch=""
 inputs=0
+input=""
 for a in "$@"; do
   if [[ "$a" == -verify_arch ]]; then verify=1; continue; fi
   if (( verify )) && [[ -z "$arch" ]]; then arch="$a"; continue; fi
   inputs=$((inputs + 1))
+  input="$a"
 done
 if (( verify )) && [[ "$inputs" -ne 1 ]]; then
-  printf 'lipo: -verify_arch requires exactly one input file\\n' >&2
+  echo 'lipo: -verify_arch requires exactly one input file' >&2
   exit 1
 fi
-case " $STUB_ARCHS " in
+case " $(sed -n 2p "$input") " in
   *" $arch "*) exit 0 ;;
   *) exit 1 ;;
 esac
 STUB
-touch "$stub_dir/Imnota"
-declare -f verify_universal_binary | sed "s|/usr/bin/lipo|bash $stub_dir/lipo|g" > "$stub_dir/fn.sh"
+{ declare -f verify_arm64_binary; declare -f verify_arm64_executables; } |
+  sed "s|/usr/bin/lipo|bash $stub_dir/lipo|g" > "$stub_dir/fn.sh"
 source "$stub_dir/fn.sh"
-export STUB_ARCHS="x86_64 arm64"
-verify_universal_binary "$stub_dir/Imnota"
-set +e
-export STUB_ARCHS="arm64"
-verify_universal_binary "$stub_dir/Imnota"
-status=$?
-set -e
-[[ "$status" -ne 0 ]]
+binary() { mkdir -p "\${1%/*}"; printf '#!/bin/bash\n%s\n' "$2" > "$1"; chmod +x "$1"; }
+bundle() {
+  local app="$stub_dir/$1/Imnota.app" main=$2 helper=$3
+  rm -rf "$stub_dir/$1"
+  binary "$app/Contents/MacOS/Imnota" "$main"
+  binary "$app/Contents/Resources/imnota-capture-helper" "$helper"
+  binary "$app/Contents/Resources/imnota-security-observer" "$helper"
+  binary "$app/Contents/Frameworks/Imnota Helper.app/Contents/MacOS/Imnota Helper" "$helper"
+  binary "$app/Contents/Frameworks/Imnota Helper (GPU).app/Contents/MacOS/Imnota Helper (GPU)" "$helper"
+  binary "$app/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework" "$helper"
+  printf '%s' "$app"
+}
+expect_refused() { if "$@"; then echo "unexpectedly accepted: $*" >&2; exit 1; fi; }
+verify_arm64_binary "$(bundle universal 'x86_64 arm64' 'x86_64 arm64')/Contents/MacOS/Imnota"
+verify_arm64_executables "$(bundle universal 'x86_64 arm64' 'x86_64 arm64')"
+verify_arm64_executables "$(bundle arm64 arm64 arm64)"
+expect_refused verify_arm64_executables "$(bundle intel x86_64 x86_64)"
+expect_refused verify_arm64_executables "$(bundle intel-helpers arm64 x86_64)"
+app=$(bundle intel-gpu arm64 arm64)
+binary "$app/Contents/Frameworks/Imnota Helper (GPU).app/Contents/MacOS/Imnota Helper (GPU)" x86_64
+expect_refused verify_arm64_executables "$app"
+app=$(bundle intel-framework arm64 arm64)
+binary "$app/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework" x86_64
+expect_refused verify_arm64_executables "$app"
+app=$(bundle missing-framework arm64 arm64)
+rm "$app/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework"
+expect_refused verify_arm64_executables "$app"
+app=$(bundle missing-observer arm64 arm64)
+rm "$app/Contents/Resources/imnota-security-observer"
+expect_refused verify_arm64_executables "$app"
+app=$(bundle missing-helper-executable arm64 arm64)
+rm "$app/Contents/Frameworks/Imnota Helper.app/Contents/MacOS/Imnota Helper"
+expect_refused verify_arm64_executables "$app"
+app=$(bundle no-helper-apps arm64 arm64)
+rm -rf "$app/Contents/Frameworks"
+expect_refused verify_arm64_executables "$app"
 rm -rf "$stub_dir"
+printf ok
 `);
   assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, 'ok');
 });
 
 test(
@@ -1347,7 +1606,7 @@ plist_value() {
 macos_version() { printf 12.7.6; }
 validate_bundle_symlinks() { :; }
 verify_signature() { :; }
-verify_universal_binary() { :; }
+verify_arm64_executables() { :; }
 validate_extracted_bundle "$stage_dir/extracted" 1.2.3
 printf 'should-not-quit-or-replace'
 `);

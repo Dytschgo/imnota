@@ -15,6 +15,7 @@ import { join, dirname, basename } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { runWalkthroughChild } from './walkthrough-child.mjs';
 import { logFaultLifecycle } from './native-fault-lifecycle.mjs';
+import { faultCases } from './native-fault-catalog.mjs';
 import {
   retainFaultOperands,
   writeFaultEvidenceManifest,
@@ -134,9 +135,9 @@ it('detects hidden journal loss, byte changes and extra files after evidence tra
 
 it('surfaces candidate-bound case starts on failure and rejects forged or incomplete success logs', () => {
   const { proof } = fixture();
-  Object.assign(proof, { caseSet: 'restore-eio', sourceSha: 'a'.repeat(40) });
+  Object.assign(proof, { caseSet: 'restore-errno', sourceSha: 'a'.repeat(40) });
   const filename = join(proof.artifactRoot, 'case-lifecycle.jsonl');
-  const receipts = ['screenshot', 'drawing', 'text'].flatMap((caseId) =>
+  const receipts = faultCases('restore-errno').flatMap((caseId) =>
     ['starting', 'passed'].map((phase) => ({
       nonce: proof.nonce,
       sourceSha: proof.sourceSha,
@@ -150,18 +151,20 @@ it('surfaces candidate-bound case starts on failure and rejects forged or incomp
   write(receipts.slice(0, 1));
   const failedLines = [];
   logFaultLifecycle(proof, false, (line) => failedLines.push(line));
-  assert.deepEqual(failedLines, ['Native fault case starting: restore-eio/screenshot']);
+  assert.deepEqual(failedLines, ['Native fault case starting: restore-errno/screenshot-eio']);
   assert.throws(() => logFaultLifecycle(proof, true), /Missing/);
   write(receipts);
   const lines = [];
   logFaultLifecycle(proof, true, (line) => lines.push(line));
-  assert.equal(lines.length, 6);
-  assert.equal(lines.at(-1), 'Native fault case passed: restore-eio/text');
+  assert.equal(lines.length, 18);
+  assert.equal(lines.at(-1), 'Native fault case passed: restore-errno/text-eperm');
   for (const invalid of [
     receipts.map((entry) => ({ ...entry, nonce: 'foreign' })),
     receipts.map((entry) => ({ ...entry, sourceSha: 'b'.repeat(40) })),
     [receipts[1], receipts[0], ...receipts.slice(2)],
     [...receipts, receipts[0]],
+    // One errno variant missing from the combined launch.
+    receipts.filter((entry) => entry.caseId !== 'drawing-eacces'),
   ]) {
     write(invalid);
     const rejectedLines = [];

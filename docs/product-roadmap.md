@@ -14,7 +14,7 @@ The roadmap is ordered by user value and implementation risk. The mixed-content 
 
 ### Decision: macOS support
 
-Owner decision, 2026-10-15: Intel Macs are no longer tested or supported. Apple Silicon is the only macOS acceptance target. Mac builds remain universal (x86_64 + arm64) until a separate packaging decision; including Intel binaries does not imply Intel testing or support. Windows and Linux remain supported platforms.
+Owner decision, 2026-10-15: Intel Macs are no longer tested or supported. Apple Silicon is the only macOS acceptance target. Mac builds remain universal (x86_64 + arm64) until a separate packaging decision; including Intel binaries does not imply Intel testing or support. Owner decision, 2026-11-16: macOS builds move to Apple Silicon only (arm64) on every channel, after a bridge release that teaches the existing updaters to accept arm64 archives (see [the improvement plan](improvement-plan.md#phase-1-ci-critical-path)). Windows and Linux remain supported platforms.
 
 ### Approved scope: optional local agent access
 

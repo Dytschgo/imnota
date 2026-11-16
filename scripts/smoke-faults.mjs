@@ -2,7 +2,12 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, realpathSync, mkdirSync, lstatSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { faultCaseSets, assertFaultAggregate, assertFaultReport } from './native-fault-catalog.mjs';
+import {
+  faultCaseSets,
+  assertFaultAggregate,
+  assertFaultCaseEvidence,
+  assertFaultReport,
+} from './native-fault-catalog.mjs';
 import { prepareArtifactDirectory, runNativeVerification } from './smoke-process.mjs';
 
 import { writeFaultEvidenceManifest } from './native-fault-retention.mjs';
@@ -91,8 +96,10 @@ export async function runPackagedFaults({ executable, suppliedPackage, runningEx
         throw new Error('Fault group candidate binding changed.');
       assertFaultReport(report, proof);
       for (const resultCase of report.faults.cases) {
-        if (digest(readFileSync(join(artifacts, resultCase.caseId, 'case.json'))) !== resultCase.sha256)
+        const evidence = readFileSync(join(artifacts, resultCase.caseId, 'case.json'));
+        if (digest(evidence) !== resultCase.sha256)
           throw new Error('Fault case evidence is missing or changed.');
+        assertFaultCaseEvidence(caseSet, resultCase.caseId, JSON.parse(evidence.toString('utf8')));
       }
       entry.passed = true;
       console.log(
