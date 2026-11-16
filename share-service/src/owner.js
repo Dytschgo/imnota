@@ -1,14 +1,10 @@
 import { versionStaticHead } from './static-assets.js';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { directorySize } from './maintenance.js';
 import { ownerPage } from './owner-page.js';
 
-const sourceDir = path.dirname(fileURLToPath(import.meta.url));
-const staticDir = path.resolve(sourceDir, '../public');
 const sessionCookie = '__Host-imnota_owner';
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/u;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -546,5 +542,3 @@ export function recordUsage({ db, now = () => Date.now() }) {
     return next();
   };
 }
-
-export const ownerStaticDir = staticDir;

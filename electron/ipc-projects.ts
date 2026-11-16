@@ -26,7 +26,6 @@ export function registerProjectIpc(router: IpcRouter, host: IpcHost): void {
     mutateProjectMetadata,
     openWithRecovery,
     readProject,
-    readProjectMutationBaseline,
     uniqueProjectFolder,
     withinProjectCreationQueue,
     workspaceOrThrow,
@@ -163,14 +162,6 @@ export function registerProjectIpc(router: IpcRouter, host: IpcHost): void {
   handle('projects:recently-deleted', async (_event, projectPath: string) =>
     listRecentlyDeleted(await assertProjectPath(projectPath)),
   );
-  handle('projects:archive', async (_event, projectPath: string) => {
-    const safePath = await assertProjectPath(projectPath);
-    const baseline = await readProjectMutationBaseline(safePath);
-    await mutateProjectMetadata(safePath, baseline.projectRevision, (project) => ({
-      ...project,
-      status: 'archived',
-    }));
-  });
   handle('projects:delete', async (_event, projectPath: string) => {
     const safePath = await assertProjectPath(projectPath);
     const smokeApproved = process.env.IMNOTA_SMOKE === '1' && host.smokeProjectDeletionPath === safePath;

@@ -38,7 +38,6 @@ export const contentImage = z
     height: z.number().int().min(1).max(16_384),
   })
   .strict();
-export const imageExport = z.object({ filename: filenameSchema, dataUrl: png });
 export const workflowSessionId = z
   .string()
   .regex(/^[a-zA-Z0-9_-]+$/)
@@ -113,7 +112,6 @@ export const contracts: Record<string, z.ZodType<unknown[]>> = {
   'projects:load': singlePath,
   'projects:recently-deleted': singlePath,
   'projects:duplicate': singlePath,
-  'projects:archive': singlePath,
   'projects:delete': singlePath,
   'projects:save': z.tuple([pathInput, projectSchema]),
   'projects:update-metadata': z.tuple([
@@ -202,19 +200,6 @@ export const contracts: Record<string, z.ZodType<unknown[]>> = {
     z.object({ projectPath: pathInput, itemId: z.string().min(1).max(200) }).strict(),
   ]),
   'content:undo-delete': z.tuple([z.object({ projectPath: pathInput, undoToken: filenameSchema }).strict()]),
-  'exports:annotated-image': z.tuple([
-    imageExport.extend({ projectPath: pathInput, collectionId: filenameSchema.optional() }),
-  ]),
-  'exports:package': z.tuple([
-    z.object({
-      projectPath: pathInput,
-      markdown: z.string().max(2_000_000),
-      annotatedImages: z.array(imageExport).max(1000),
-      includeOriginal: z.boolean(),
-      includeAnnotations: z.boolean(),
-      collectionId: filenameSchema.optional(),
-    }),
-  ]),
   'system:copy-text': z.tuple([z.string().max(2_000_000)]),
   'system:copy-context': z.tuple([
     z
@@ -244,14 +229,6 @@ export const contracts: Record<string, z.ZodType<unknown[]>> = {
   'onboarding:open-handoff': z.tuple([
     z.object({ sessionId: z.uuid(), target: z.enum(['files', 'folder']) }).strict(),
   ]),
-  'recovery:save': z.tuple([
-    z.object({
-      projectPath: pathInput,
-      project: projectSchema,
-      annotations: z.record(z.string(), z.array(annotationSchema)),
-    }),
-  ]),
-  'recovery:clear': singlePath,
   'update:download': z.tuple([]),
   'update:check': z.tuple([]),
   'update:status': z.tuple([]),

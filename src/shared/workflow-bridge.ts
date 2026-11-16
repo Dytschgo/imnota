@@ -146,13 +146,11 @@ export interface HostedShareRecoveryWarning {
 
 export interface HostedShareList {
   records: readonly HostedShareRecord[];
-  /** Recovery problems are shown alongside intact local history and can be retried later. */
-  recoveryErrors: readonly string[];
   /**
-   * Incident-specific recovery warnings. New desktop clients can acknowledge these by id.
-   * Optional while older native clients and renderer test doubles are still supported.
+   * Incident-specific recovery problems, shown alongside intact local history. They can be
+   * retried later or acknowledged by id.
    */
-  recoveryWarnings?: readonly HostedShareRecoveryWarning[];
+  recoveryWarnings: readonly HostedShareRecoveryWarning[];
 }
 
 /** Drawing sources are carried into the reserved export directory, never rasterized as text. */
@@ -162,7 +160,6 @@ export interface PromptExportSourceAsset {
 }
 
 /** Stable IDs used by the Windows nightly clipboard comparison. */
-export const WINDOWS_COPY_VARIANT_IDS = ['files', 'files-rich', 'rich'] as const;
 export type WindowsCopyVariantId = NativeCopyFunction;
 
 export type PromptExportCopyTarget =

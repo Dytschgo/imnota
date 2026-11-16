@@ -49,6 +49,32 @@ export interface CaptureSmokeResult {
 
 const delay = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
+async function promptExportSets(exportsDirectory: string): Promise<string[]> {
+  const entries = await fs.readdir(exportsDirectory, { withFileTypes: true }).catch(() => []);
+  return entries
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+    .map((entry) => entry.name);
+}
+
+/** Waits for the newly published prompt set and returns its first bundle PNG. */
+async function waitForExportedPromptPng(
+  exportsDirectory: string,
+  previousSets: ReadonlySet<string>,
+): Promise<Buffer> {
+  const deadline = Date.now() + 30_000;
+  do {
+    for (const name of await promptExportSets(exportsDirectory)) {
+      if (previousSets.has(name)) continue;
+      const files = await fs.readdir(path.join(exportsDirectory, name));
+      const png = files.find((file) => file.endsWith(' - 01.png'));
+      if (png && files.some((file) => file.endsWith(' - 01.md')))
+        return fs.readFile(path.join(exportsDirectory, name, png));
+    }
+    await delay(50);
+  } while (Date.now() < deadline);
+  throw new Error('Synthetic capture prompt bundle export did not publish a Markdown/PNG pair.');
+}
+
 function smokeCaptureIsEnabled(): boolean {
   return process.env.IMNOTA_SMOKE === '1' && process.env.IMNOTA_SMOKE_CAPTURE_SOURCE === 'synthetic';
 }
@@ -786,18 +812,25 @@ export async function exerciseRegionCapture(
   if (artifactDirectory)
     artifacts.push(await driver.capture(artifactDirectory, 'capture-annotation-synthetic.png', captured));
 
-  const exportPath = await driver.evaluate<string>(`(async () => {
-    const canvas = document.querySelector('.konvajs-content canvas');
-    if (!(canvas instanceof HTMLCanvasElement)) throw new Error('Annotation canvas was not rendered.');
-    return window.imnota.exportAnnotatedImage({
-      projectPath: ${JSON.stringify(projectPath)},
-      collectionId: ${JSON.stringify(captured.collectionId)},
-      filename: 'synthetic-capture-annotation.png',
-      dataUrl: canvas.toDataURL('image/png')
-    });
-  })()`);
-  const exported = await fs.stat(exportPath);
-  if (exported.size === 0) throw new Error('Synthetic capture annotation export is empty.');
+  // Export the annotated capture through the prompt bundle dialog the UI offers.
+  const exportsDirectory = path.join(projectPath, 'collections', captured.collectionId, 'exports');
+  const setsBeforeExport = new Set(await promptExportSets(exportsDirectory));
+  const promptDialog = '[data-testid="prompt-sharing-dialog"][aria-busy="false"]';
+  await driver.click({ selector: '[data-testid="share-prompt-bundles"]' });
+  await driver.waitFor(
+    { selector: `${promptDialog} [data-testid="copy-bundle-1"]:not(:disabled)` },
+    { timeoutMs: 30_000 },
+  );
+  await driver.click({ selector: '[data-testid="copy-bundle-1"]' });
+  await driver.waitFor(
+    { selector: `${promptDialog} [data-testid="copy-bundle-1"].is-copied` },
+    { timeoutMs: 30_000 },
+  );
+  await driver.click({ selector: '[data-testid="prompt-sharing-close"]' });
+  await driver.waitFor({ selector: '[data-testid="prompt-sharing-dialog"]' }, { absent: true });
+  const exportedPng = await waitForExportedPromptPng(exportsDirectory, setsBeforeExport);
+  if (nativeImage.createFromBuffer(exportedPng).isEmpty())
+    throw new Error('Synthetic capture prompt bundle export is empty.');
 
   overlay = await startCapture(driver);
   await selectRegion(overlay);

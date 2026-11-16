@@ -519,7 +519,7 @@ describe('HostedShareClient persistence and recovery', () => {
 
     expect(result.records).toHaveLength(2);
     expect(concurrentResult).toEqual(result);
-    expect(result.recoveryErrors).toEqual([]);
+    expect(result.recoveryWarnings).toEqual([]);
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(seenHeaders).toEqual([
       { Authorization: `Bearer ${'a'.repeat(43)}`, Accept: 'application/json' },
@@ -550,7 +550,10 @@ describe('HostedShareClient persistence and recovery', () => {
     ).toHaveProperty(firstRequest);
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ ...receipt(), recovered: true })));
-    await expect(client.list()).resolves.toMatchObject({ records: [{ id: firstShare }], recoveryErrors: [] });
+    await expect(client.list()).resolves.toMatchObject({
+      records: [{ id: firstShare }],
+      recoveryWarnings: [],
+    });
   });
 
   it('keeps the original capability when a lost response is retried with a changed pairing code', async () => {
@@ -599,7 +602,7 @@ describe('HostedShareClient persistence and recovery', () => {
     const settled = uploadOperation.catch((error: unknown) => error);
     await requestStarted;
 
-    await expect(client.list()).resolves.toMatchObject({ records: [], recoveryErrors: [] });
+    await expect(client.list()).resolves.toMatchObject({ records: [], recoveryWarnings: [] });
     expect(fetch).toHaveBeenCalledTimes(1);
     await client.cancel(firstRequest);
     await expect(settled).resolves.toMatchObject({ code: 'session-cancelled' });
@@ -626,7 +629,7 @@ describe('HostedShareClient persistence and recovery', () => {
 
     const result = await client.list();
     expect(result.records.map((record) => record.id)).toEqual([firstShare]);
-    expect(result.recoveryErrors).toEqual([
+    expect(result.recoveryWarnings.map((warning) => warning.message)).toEqual([
       'A previous share upload could not be recovered because its receipt expired.',
       'Recovery is unavailable.',
     ]);
@@ -653,7 +656,7 @@ describe('HostedShareClient persistence and recovery', () => {
 
     expect(fetch).not.toHaveBeenCalled();
     expect(result.records).toEqual([]);
-    expect(result.recoveryErrors).toEqual([
+    expect(result.recoveryWarnings.map((warning) => warning.message)).toEqual([
       'A previous share upload was not resolved within 24 hours. Its local recovery capability was cleared.',
     ]);
     expect(JSON.parse(await fs.readFile(pendingFile, 'utf8'))).toEqual({});
@@ -676,7 +679,9 @@ describe('HostedShareClient persistence and recovery', () => {
 
     await expect(client.list()).resolves.toMatchObject({
       records: [],
-      recoveryErrors: ['A previous share receipt is not ready yet. Recovery will retry later.'],
+      recoveryWarnings: [
+        { message: 'A previous share receipt is not ready yet. Recovery will retry later.' },
+      ],
     });
     const retained = JSON.parse(await fs.readFile(pendingFile, 'utf8'));
     expect(Object.keys(retained)).toEqual([firstRequest]);
@@ -684,7 +689,7 @@ describe('HostedShareClient persistence and recovery', () => {
 
     await expect(client.list()).resolves.toMatchObject({
       records: [{ id: firstShare }],
-      recoveryErrors: [],
+      recoveryWarnings: [],
     });
     expect(JSON.parse(await fs.readFile(pendingFile, 'utf8'))).toEqual({});
     expect(fetch).toHaveBeenCalledTimes(2);
@@ -718,7 +723,7 @@ describe('HostedShareClient persistence and recovery', () => {
 
     const result = await client.list();
 
-    expect(result.recoveryErrors).toEqual([
+    expect(result.recoveryWarnings.map((warning) => warning.message)).toEqual([
       'This pairing code expired or was already used. Create a new code in your browser. Its local recovery capability was cleared.',
       'Upload still running.',
     ]);
@@ -755,9 +760,9 @@ describe('HostedShareClient persistence and recovery', () => {
       code: 'ENOENT',
     });
 
-    await expect(client.list()).resolves.toMatchObject({ recoveryErrors: [], recoveryWarnings: [] });
+    await expect(client.list()).resolves.toMatchObject({ recoveryWarnings: [] });
     const reopened = new HostedShareClient(root, async () => undefined);
-    await expect(reopened.list()).resolves.toMatchObject({ recoveryErrors: [], recoveryWarnings: [] });
+    await expect(reopened.list()).resolves.toMatchObject({ recoveryWarnings: [] });
 
     const pending = JSON.parse(await fs.readFile(pendingFile, 'utf8'));
     pending[secondRequest] = { requestId: secondRequest, pairingToken: 'b'.repeat(43) };
@@ -808,7 +813,7 @@ describe('HostedShareClient persistence and recovery', () => {
     await fs.writeFile(path.join(root, 'hosted-share-pending.json'), corruptPending);
     await expect(client.list()).resolves.toMatchObject({
       records: [{ id: firstShare }],
-      recoveryErrors: [expect.stringMatching(/recovery metadata is corrupt.*preserved/i)],
+      recoveryWarnings: [{ message: expect.stringMatching(/recovery metadata is corrupt.*preserved/i) }],
     });
     expect(await fs.readFile(path.join(root, 'hosted-share-pending.json'), 'utf8')).toBe(corruptPending);
   });
@@ -837,7 +842,7 @@ describe('HostedShareClient persistence and recovery', () => {
     await vi.advanceTimersByTimeAsync(15_000);
     await expect(listing).resolves.toMatchObject({
       records: [{ id: firstShare }],
-      recoveryErrors: [expect.stringMatching(/15 seconds/)],
+      recoveryWarnings: [{ message: expect.stringMatching(/15 seconds/) }],
     });
 
     const revoking = client.revoke(firstShare).then(
