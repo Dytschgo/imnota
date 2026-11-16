@@ -103,6 +103,7 @@ export function Modal({
   closeTestId,
   variant = 'default',
   hidden = false,
+  busy = false,
 }: {
   title: string;
   description?: string;
@@ -111,6 +112,7 @@ export function Modal({
   closeTestId?: string;
   variant?: 'default' | 'preview';
   hidden?: boolean;
+  busy?: boolean;
 }) {
   const titleId = `${useId().replace(/:/g, '')}-title`;
   const descriptionId = `${useId().replace(/:/g, '')}-description`;
@@ -212,6 +214,7 @@ export function Modal({
         className={`modal modal-${variant}`}
         role="dialog"
         aria-modal="true"
+        aria-busy={busy || undefined}
         aria-labelledby={titleId}
         aria-describedby={description ? descriptionId : undefined}
       >

@@ -1,6 +1,7 @@
 import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { sharingSenderNameSchema } from '../../shared/schema';
 import type { ImnotaBridge, WorkspaceSettings } from '../../shared/types';
 import { useAppStore } from '../store';
 import {
@@ -31,6 +32,37 @@ describe('sharing sender-name preferences', () => {
     expect(validateSharingSenderName('x'.repeat(81))).toMatchObject({ ok: false });
     expect(validateSharingSenderName('Dylan\u202e')).toMatchObject({ ok: false });
     expect(validateSharingSenderName('')).toEqual({ ok: true, value: '' });
+  });
+
+  it('accepts and rejects exactly what the settings schema does, with the same messages', () => {
+    const tooLong = 'Keep the sender name to 80 characters or fewer.';
+    const unprintable = 'Use a plain sender name without control or formatting characters.';
+    const cases: Array<[string, string | null]> = [
+      ['', null],
+      ['   ', null],
+      ['  Ada Lovelace  ', null],
+      ['José', null],
+      ['🙂'.repeat(80), null],
+      [`  ${'x'.repeat(80)}  `, null],
+      ['é'.repeat(80), null],
+      ['x'.repeat(81), tooLong],
+      ['🙂'.repeat(81), tooLong],
+      [`${'x'.repeat(81)}‮`, tooLong],
+      ['Dylan‮', unprintable],
+      ['Ada⁦', unprintable],
+      ['Ada‍Lovelace', unprintable],
+      ['Ada\tLovelace', unprintable],
+      ['Ada\u0000', unprintable],
+      ['Ada﻿ Lovelace', unprintable],
+      ['Ada', unprintable],
+    ];
+    for (const [input, error] of cases) {
+      const parsed = sharingSenderNameSchema.safeParse(input);
+      expect(parsed.success, JSON.stringify(input)).toBe(error === null);
+      expect(validateSharingSenderName(input), JSON.stringify(input)).toEqual(
+        parsed.success ? { ok: true, value: parsed.data } : { ok: false, error },
+      );
+    }
   });
 
   it('normalizes and persists a name, then clears the optional persisted value', async () => {

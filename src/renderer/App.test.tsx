@@ -10,13 +10,9 @@ import { DEFAULT_PREFERENCE_SETTINGS } from '../shared/preferences';
 import { CANVAS_COMMAND_EVENT, type CanvasCommand } from './canvas/commands';
 import type { AnnotationCanvasProps } from './components/AnnotationCanvas';
 import { useAppStore } from './store';
-import App, {
-  CollectionControls,
-  SettingsView,
-  TOAST_ACTION_MS,
-  TOAST_STATUS_MS,
-  userFacingErrorMessage,
-} from './App';
+import { SettingsView } from './settings/SettingsView';
+import { OnboardingDemo } from './app/lazy-surfaces';
+import App, { CollectionControls, TOAST_ACTION_MS, TOAST_STATUS_MS, userFacingErrorMessage } from './App';
 
 // These tests exercise navigation and the real note editor; canvas rendering is covered by Electron smoke.
 const annotationCanvasSpy = vi.hoisted(() => vi.fn());
@@ -247,6 +243,8 @@ describe('feedback controls', () => {
           throw new Error('Fresh-profile startup exceeded 100 commits; possible render/effect loop.');
       });
       let view!: ReturnType<typeof renderApp>;
+      // Onboarding is a separate chunk; load it first so fake timers cannot hold its first render.
+      await OnboardingDemo.preload();
       vi.useFakeTimers();
       try {
         await act(async () => {
@@ -525,6 +523,26 @@ describe('feedback controls', () => {
       expect.objectContaining({ screenshot: expect.objectContaining({ description: 'Latest note' }) }),
     );
     expect(useAppStore.getState().snapshot).not.toBeNull();
+  });
+
+  it('opens search from its shortcut as a modal over the focused row and keeps what is typed', async () => {
+    const deleteScreenshot = vi.fn<ImnotaBridge['deleteScreenshot']>();
+    await renderEditingProject({ deleteScreenshot });
+    const row = screen.getByTestId('screenshot-shot');
+    row.focus();
+
+    fireEvent.keyDown(row, { key: 'f', ctrlKey: true });
+    const search = await screen.findByTestId('global-search-input');
+    await waitFor(() => expect(search).toHaveFocus());
+    fireEvent.change(search, { target: { value: 'checkout' } });
+    fireEvent.keyDown(search, { key: 'Delete', ctrlKey: true });
+    expect(search).toHaveValue('checkout');
+    expect(screen.queryByRole('dialog', { name: 'Delete this screenshot?' })).not.toBeInTheDocument();
+    expect(deleteScreenshot).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(search, { key: 'Escape' });
+    expect(screen.queryByTestId('global-search-input')).not.toBeInTheDocument();
+    expect(row).toHaveFocus();
   });
 
   it('keeps the workspace location while global search is open', async () => {

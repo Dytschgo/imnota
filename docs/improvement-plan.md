@@ -170,6 +170,7 @@ Measure each slice first. Use React Profiler commit counts and durations on a 10
    - The startup JavaScript is about 1.21 MB minified (measured).
    - Remove zod from that bundle: replace the sender-name schema and lazy-load the fault probe.
    - Lazy-load Settings, onboarding, What's New and the share dialogs.
+   - In review (#339): zod is out of the startup bundle. The backup defaults and the screenshot-source schema were also pulling it in. Settings, onboarding and the Share bundles dialogs load lazily and are preloaded when the app is idle; onboarding and Share bundles show a modal loading shell until their chunk arrives. Search, the app dialogs, capture destination and What's New stay eager because they open by shortcut, hotkey or at boot. Initial chunks fall from 1211.7 kB to 1010.4 kB, and `main` from 606.2 kB to 403.5 kB.
 5. **Thumbnails outside the snapshot.**
    - Problem: every snapshot re-sends all thumbnails as data URLs of about 50 kB each.
    - Change: serve thumbnails per item instead.

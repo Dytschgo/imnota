@@ -45,10 +45,15 @@ import {
 import { Logo } from './components/Logo';
 import type { ToolChoice } from './components/Toolbar';
 import { Button, IconButton, Modal } from './components/ui';
-import { OnboardingDemo } from './onboarding';
-import { PromptBundleDialogHost } from './export/PromptBundleDialogHost';
+import {
+  OnboardingDemo,
+  PromptBundleDialogHost,
+  SettingsView,
+  useDeferredSurfacePreload,
+} from './app/lazy-surfaces';
 import { usePromptBundleController } from './export/usePromptBundleController';
-import { SETTINGS_CATEGORIES, SettingsView, useKeyboardShortcuts, type SettingsCategory } from './settings';
+import { SETTINGS_CATEGORIES, type SettingsCategory } from './settings/settings-categories';
+import { useKeyboardShortcuts } from './settings/useKeyboardShortcuts';
 import { useAppStore, type AppView } from './store';
 import {
   moveNavigationLocation,
@@ -65,8 +70,8 @@ import {
   registerNativeFaultAdapter,
   reportNativeFaultTransition,
   observeNativeFaultSave,
-} from './app/native-fault-probe';
-import { FAULT_DESCRIPTION, FAULT_MARKDOWN } from '../shared/native-faults';
+} from './app/native-fault-gate';
+import { FAULT_DESCRIPTION, FAULT_MARKDOWN } from '../shared/native-fault-fixtures';
 import { SearchDialog, type ProjectSearchScope, type ProjectSearchTarget } from './search';
 import './app/project-management.css';
 import { Library } from './app/Library';
@@ -85,7 +90,6 @@ import { findWhatsNewRelease, shouldShowWhatsNew } from '../shared/whats-new';
 import { reasonMessage, splitDiagnosticReference, userFacingErrorMessage } from './user-facing-error';
 
 export { CollectionControls } from './collection/CollectionRail';
-export { SettingsView } from './settings/SettingsView';
 
 interface SnapshotNotice {
   projectPath: string;
@@ -2244,6 +2248,7 @@ export default function App() {
     if (booting || preferences.loading) return;
     void window.imnota.captureRendererReady();
   }, [booting, preferences.loading]);
+  useDeferredSurfacePreload(!booting && !preferences.loading);
 
   if (booting || preferences.loading)
     return (

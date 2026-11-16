@@ -38,17 +38,9 @@ import type { ProjectListItem } from '../../shared/types';
 import type { UpdateStatus } from '../../shared/types';
 import { findWhatsNewRelease, whatsNewReleaseUrl } from '../../shared/whats-new';
 
-export const SETTINGS_CATEGORIES = [
-  'Appearance',
-  'Shortcuts',
-  'Features',
-  'Workspace',
-  'Sharing',
-  'Backups & history',
-  'Updates & about',
-  'What’s new',
-] as const;
-export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number];
+import { SETTINGS_CATEGORIES, type SettingsCategory } from './settings-categories';
+
+export { SETTINGS_CATEGORIES, type SettingsCategory };
 
 const CATEGORY_ICONS = {
   Appearance: Monitor,
