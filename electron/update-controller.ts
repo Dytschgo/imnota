@@ -85,17 +85,21 @@ export class UpdateController {
     this.pending = this.performCheck(() => {
       preparationStarted = true;
     })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (this.pendingIsBackground && !preparationStarted) {
           this.candidate = previous.candidate;
           this.status = previous.status;
           return;
         }
         this.candidate = null;
+        // A preparation refusal (for example an unsupported Mac) explains itself;
+        // never offer a download the updater would then refuse.
         this.send({
           state: 'error',
           message:
-            'Could not check this channel. Check your connection or try again later. Your projects are unchanged.',
+            preparationStarted && error instanceof UpdateFailure
+              ? `${error.message} Your projects are unchanged.`
+              : 'Could not check this channel. Check your connection or try again later. Your projects are unchanged.',
         });
       })
       .finally(() => {

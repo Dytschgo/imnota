@@ -127,6 +127,7 @@ describe('in-app macOS updates', () => {
           helperPath,
           cachePath: cache,
           currentVersion: '0.4.0',
+          host: { appleSilicon: true },
         },
         events,
         5,
@@ -171,6 +172,7 @@ describe('in-app macOS updates', () => {
           helperPath,
           cachePath: cache,
           currentVersion: '0.4.0',
+          host: { appleSilicon: true },
         },
         { progress: vi.fn(), failed: vi.fn() },
         5,
@@ -185,6 +187,29 @@ describe('in-app macOS updates', () => {
       (spawned.calls.at(-1)?.child as EventEmitter | undefined)?.emit('exit', 1);
       await started?.ready.catch(() => undefined);
       await vi.waitFor(async () => expect(await fs.readdir(cache)).toEqual(['bundled-update-macos.sh']));
+      await fs.rm(cache, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses an arm64-only release on an Intel Mac before copying or starting the helper', async () => {
+    const cache = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-mac-update-test-'));
+    const spawnCount = spawned.calls.length;
+    try {
+      const arm64Release = { ...release, assetUrls: [`${base}Imnota-${version}-arm64-mac.zip`] };
+      const options = {
+        appPath: '/Applications/Imnota.app',
+        appPid: 4321,
+        helperPath: path.join(cache, 'missing-helper.sh'),
+        cachePath: cache,
+        currentVersion: '0.4.0',
+        host: { appleSilicon: false },
+      };
+      const refused = startMacUpdate(arm64Release, options, { progress: vi.fn(), failed: vi.fn() }, 5);
+      await expect(refused).rejects.toBeInstanceOf(UpdateFailure);
+      await expect(refused).rejects.toThrow(/Intel Macs are no longer supported/);
+      expect(spawned.calls.length).toBe(spawnCount);
+      expect(await fs.readdir(cache)).toEqual([]);
+    } finally {
       await fs.rm(cache, { recursive: true, force: true });
     }
   });
@@ -223,6 +248,7 @@ printf requested > '${installed}'
             helperPath,
             cachePath: cache,
             currentVersion: '0.4.0',
+            host: { appleSilicon: true },
           },
           events,
           5,
