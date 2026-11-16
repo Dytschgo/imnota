@@ -1,6 +1,6 @@
-import { createRequire } from 'node:module';
 import path from 'node:path';
 import { MAX_CAPTURE_PIXELS } from '../src/shared/capture.js';
+import { loadKoffi, type KoffiLibrary } from './koffi.js';
 
 const CF_BITMAP = 2;
 const CF_HDROP = 15;
@@ -52,14 +52,6 @@ const SAFE_REGISTERED_GLOBAL_FORMATS = new Set([
 // releases that owner, so a byte clone cannot recreate these broker references.
 const TRANSIENT_OLE_FORMATS = new Set(['dataobject', 'ole private data', 'wine marshalled dataobject']);
 type NativeHandle = unknown;
-
-interface KoffiLibrary {
-  func(name: string, result: string, parameters: readonly string[]): (...args: unknown[]) => unknown;
-}
-
-interface KoffiModule {
-  load(name: string): KoffiLibrary;
-}
 
 export interface WindowsClipboardApi {
   openClipboard(owner: bigint | number): boolean;
@@ -156,17 +148,6 @@ function numberResult(value: unknown): number {
   return typeof value === 'bigint' ? Number(value) : Number(value);
 }
 
-function loadKoffi(): KoffiModule {
-  const packageName =
-    process.arch === 'x64'
-      ? '@koromix/koffi-win32-x64'
-      : process.arch === 'arm64'
-        ? '@koromix/koffi-win32-arm64'
-        : undefined;
-  if (!packageName) throw new Error(`Windows file clipboard is unavailable on ${process.arch}.`);
-  return createRequire(import.meta.url)(packageName) as KoffiModule;
-}
-
 export function windowsFileClipboardAvailable(platform = process.platform): boolean {
   if (platform !== 'win32') return false;
   try {
@@ -180,7 +161,7 @@ export function windowsFileClipboardAvailable(platform = process.platform): bool
 export function loadWindowsClipboardApi(): WindowsClipboardApi {
   if (process.platform !== 'win32') throw new Error('Windows file clipboard is available only on Windows.');
   if (apiCache) return apiCache;
-  const koffi = loadKoffi();
+  const koffi = loadKoffi('Windows file clipboard');
   const user32 = koffi.load('user32.dll');
   const kernel32 = koffi.load('kernel32.dll');
   const shell32 = koffi.load('shell32.dll');
