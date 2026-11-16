@@ -2,16 +2,12 @@ import { z } from 'zod';
 
 /** Closed verification catalog. No plan, path, code or JavaScript comes from the renderer. */
 export const NATIVE_FAULT_CASE_SETS = [
-  'restore-eio',
-  'restore-eacces',
-  'restore-eperm',
+  'restore-errno',
   'restore-confirmation',
   'restore-marker',
   'restore-later-change',
   'restore-renderer-readback',
-  'recovery-lineage-eio',
-  'recovery-lineage-eacces',
-  'recovery-lineage-eperm',
+  'recovery-lineage-errno',
   'recovery-repair',
   'recovery-ui',
 ] as const;
@@ -19,13 +15,28 @@ export const faultCaseSetSchema = z.enum(NATIVE_FAULT_CASE_SETS);
 export type NativeFaultCaseSet = z.infer<typeof faultCaseSetSchema>;
 export const faultKinds = ['screenshot', 'drawing', 'text'] as const;
 export type NativeFaultKind = (typeof faultKinds)[number];
+/** Errno families share one launch; each errno x scenario remains its own armed case. */
+export const faultErrnos = ['eio', 'eacces', 'eperm'] as const;
+export type NativeFaultErrno = 'EIO' | 'EACCES' | 'EPERM';
 export function nativeFaultCases(set: NativeFaultCaseSet): string[] {
+  if (set === 'restore-errno')
+    return faultErrnos.flatMap((errno) => faultKinds.map((kind) => `${kind}-${errno}`));
+  if (set === 'recovery-lineage-errno')
+    return faultErrnos.flatMap((errno) => ['healthy', 'foreign'].map((lineage) => `${lineage}-${errno}`));
   if (set === 'restore-confirmation')
     return faultKinds.flatMap((kind) => ['changed', 'unreadable'].map((reason) => `${kind}-${reason}`));
   if (set.startsWith('restore-')) return [...faultKinds];
-  if (set.startsWith('recovery-lineage-')) return ['healthy', 'foreign'];
   if (set === 'recovery-repair') return ['baseline-repair', 'failed-repair'];
   return ['panel-retry-reset', 'undo-hover', 'undo-focus'];
+}
+/**
+ * The errno a generic injected fault raises for one armed case. Errno-family
+ * cases carry it in their case ID; other sets keep the EIO default.
+ */
+export function nativeFaultErrno(set: NativeFaultCaseSet, caseId: string): NativeFaultErrno {
+  if (!nativeFaultCases(set).includes(caseId)) throw new Error('Unknown native fault case.');
+  if (set !== 'restore-errno' && set !== 'recovery-lineage-errno') return 'EIO';
+  return caseId.slice(caseId.lastIndexOf('-') + 1).toUpperCase() as NativeFaultErrno;
 }
 export const faultHash = z.string().regex(/^[a-f0-9]{64}$/);
 export const faultOwnershipSchema = z
