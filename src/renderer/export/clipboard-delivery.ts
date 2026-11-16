@@ -92,14 +92,6 @@ export function describeCopyMessage(variant: WindowsCopyVariantId, placed: Clipb
   return `${confirmed} ${missingRichGuidance(placed)}`;
 }
 
-/** Existing compact copy surfaces use the rich variant outside the comparison UI. */
-export function describeCombinedDelivery(
-  placed: ClipboardFormatsReport | undefined,
-  hasImage: boolean,
-): CombinedDeliveryDescription {
-  return describeCopyDelivery('rich', placed, hasImage);
-}
-
 export function describeCombinedCopyMessage(placed: ClipboardFormatsReport): string {
   return describeCopyMessage('rich', placed);
 }

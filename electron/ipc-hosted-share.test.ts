@@ -104,7 +104,7 @@ function shareHarness() {
     register: (channel, listener) => handlers.set(channel, listener),
     trustedSender: () => true,
     updateInstallPending: () => false,
-    contracts: { 'recovery:save': z.tuple([]), 'projects:save': z.tuple([]) },
+    contracts: { 'projects:save-screenshot': z.tuple([]), 'projects:save': z.tuple([]) },
     defaultContract: z.tuple([]),
     tracesChannel: () => false,
     trace: async (_channel, run) => run(),
@@ -151,24 +151,24 @@ function shareHarness() {
   };
 }
 
-it('does not hold project or recovery saves behind a pending upload or revocation', async () => {
+it('does not hold project or screenshot saves behind a pending upload or revocation', async () => {
   const { router, call, create, revoke, uploads, finishRevoke, request } = shareHarness();
   const saved: string[] = [];
   router.handle('projects:save', () => void saved.push('project'));
-  router.handle('recovery:save', () => void saved.push('recovery'));
+  router.handle('projects:save-screenshot', () => void saved.push('screenshot'));
 
   const upload = call('workflow:hosted-share:create', request('123e4567-e89b-42d3-a456-426614174010'));
   await vi.waitFor(() => expect(create).toHaveBeenCalledOnce());
   await call('projects:save');
-  await call('recovery:save');
-  expect(saved).toEqual(['project', 'recovery']);
+  await call('projects:save-screenshot');
+  expect(saved).toEqual(['project', 'screenshot']);
   uploads[0].finish();
   expect(await upload).toMatchObject({ ok: true, value: { id: '123e4567-e89b-42d3-a456-426614174010' } });
 
   const revocation = call('workflow:hosted-share:revoke', { id: 'share' });
   await vi.waitFor(() => expect(revoke).toHaveBeenCalledWith('share'));
-  await call('recovery:save');
-  expect(saved).toEqual(['project', 'recovery', 'recovery']);
+  await call('projects:save-screenshot');
+  expect(saved).toEqual(['project', 'screenshot', 'screenshot']);
   finishRevoke();
   expect(await revocation).toMatchObject({ ok: true, value: { id: 'share' } });
 });
