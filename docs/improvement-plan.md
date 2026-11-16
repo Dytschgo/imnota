@@ -156,7 +156,7 @@ Measure each slice first. Use React Profiler commit counts and durations on a 10
 1. **Render boundaries.**
    - Problem: each description keystroke or annotation commit replaces `snapshot`, which `App` and `AppShell` select. Whole-store `useAppStore()` subscriptions remain in `Workspace`, `CollectionRail` (2), `ScreenshotComparison` (2), `Library` and `SettingsView`, and nothing in `src/renderer` uses `React.memo`.
    - Change: narrow those selectors, then memoize the rail row, inspector and canvas with stable props. Do one boundary per PR.
-   - In review (#338): selectors narrowed and the three boundaries memoized together. In a 100-screenshot Profiler harness, a description keystroke re-renders 1 rail row instead of 200 and the inspector once instead of twice, and skips the canvas. An annotation commit re-renders only the canvas.
+   - Done (#338): selectors narrowed and the three boundaries memoized together. In a 100-screenshot Profiler harness, a description keystroke re-renders 1 rail row instead of 200 and the inspector once instead of twice, and skips the canvas. An annotation commit re-renders only the canvas.
 2. **Canvas frame cost.**
    - Cache pixelation output per annotation; today `AnnotationCanvas` rebuilds every region on each pointer move.
    - Batch pointer pan and draft updates per animation frame, following the wheel-input pattern from #243.
@@ -170,15 +170,15 @@ Measure each slice first. Use React Profiler commit counts and durations on a 10
    - The startup JavaScript is about 1.21 MB minified (measured).
    - Remove zod from that bundle: replace the sender-name schema and lazy-load the fault probe.
    - Lazy-load Settings, onboarding, What's New and the share dialogs.
-   - In review (#339): zod is out of the startup bundle. The backup defaults and the screenshot-source schema were also pulling it in. Settings, onboarding and the Share bundles dialogs load lazily and are preloaded when the app is idle; onboarding and Share bundles show a modal loading shell until their chunk arrives. Search, the app dialogs, capture destination and What's New stay eager because they open by shortcut, hotkey or at boot. Initial chunks fall from 1211.7 kB to 1010.4 kB, and `main` from 606.2 kB to 403.5 kB.
+   - Done (#339): zod is out of the startup bundle. The backup defaults and the screenshot-source schema were also pulling it in. Settings, onboarding and the Share bundles dialogs load lazily and are preloaded when the app is idle; onboarding and Share bundles show a modal loading shell until their chunk arrives. Search, the app dialogs, capture destination and What's New stay eager because they open by shortcut, hotkey or at boot. Initial chunks fall from 1211.7 kB to 1010.4 kB, and `main` from 606.2 kB to 403.5 kB.
 5. **Thumbnails outside the snapshot.**
    - Problem: every snapshot re-sends all thumbnails as data URLs of about 50 kB each.
    - Change: serve thumbnails per item instead.
    - Write a short design first. It changes the snapshot contract and enables the rail virtualization in [the large-collection plan](large-collection-performance-plan.md).
 6. **Smaller items.**
    - Bound and coalesce description undo history, which is currently unbounded with one entry per keystroke.
-     In review (#338): a typing burst is one undo step, with at most 100 steps per screenshot.
-   - Validate each PNG data URL once in the prompt-bundle path instead of twice. Measured: 49 ms per 8 MiB image per pass. In review (#335): the regex is replaced by a native decode check of about 2.5 ms; the IPC schema and the workflow each keep one check.
+     Done (#338): a typing burst is one undo step, with at most 100 steps per screenshot.
+   - Validate each PNG data URL once in the prompt-bundle path instead of twice. Measured: 49 ms per 8 MiB image per pass. Done (#335): the regex is replaced by a native decode check of about 2.5 ms; the IPC schema and the workflow each keep one check.
    - Convert the backdrop and What's New PNGs (about 15 MB) to WebP or AVIF. Run visual regression and record artwork provenance.
 
 ### Phase 4: Trimming
@@ -209,7 +209,7 @@ The audit found about 1,600–1,800 removable or mergeable lines out of about 85
    - Change: add **Duplicate** to the project actions in the Library, open or select the new project on success, and show the existing error, including any retained incomplete folder.
    - Tier: application behaviour, with a UI test and a native walkthrough step. It is a user-visible change, so follow the [feedback delivery contract](feedback-delivery-contract.md) and update [the user guide](user-guide.md).
 4. **Consolidation.**
-   - In review (#335):
+   - Done (#335):
      - One PNG parsing module with per-caller limits, replacing 8 implementations.
      - One `loadKoffi` helper, replacing 3.
      - One project-creation queue shared by blank and template creation, with a regression test. The IPC router already serialized `projects:create`, so the race affected only direct callers of `createTemplateProject`.
@@ -230,15 +230,35 @@ All decisions below were made on 16 November 2026:
 - Remove the legacy ZIP export, Tailwind, the recovery write channel and the duplicate share-warning field (Phase 4, item 2).
 - Expose Duplicate project in the UI (Phase 4, item 3).
 
-### Suggested order
+### Delivery status (16 November 2026)
 
-1. Phase 1, item 1, then Phase 2, items 1 and 2: the largest measured savings with no product behaviour change.
-2. Phase 4, item 1, and Phase 2, items 3 and 4.
-3. Phase 1, item 2.
-4. Phase 1, item 3, part 1 (bridge release), then part 2 in the release after it.
-5. Phase 4, items 2 and 3.
-6. Phase 3, items 1–4, one measured boundary at a time.
-7. Remaining slices only after their design or decision gate.
+Merged to `main`: #323 (this plan), #324, #325, #326, #327, #328, #329, #330, #331, #332, #333, #334, #335, #336, #337, #338 and #339. Every PR passed the full Validate workflow on its final head. Updater, persistence, IPC-validation, fault-evidence, canvas and CI changes also had an independent review, and that review's findings were fixed before merge.
+
+Measured results. CI figures are single samples on hosted runners, whose speed varies by roughly 30% between runs:
+
+- **macOS native installer transactions:** 597 s before, 202 s on #325's run and 321 s on the first post-merge `main` run (a slower runner). The eight expected-timeout cases now take about 10 s each instead of 35–66 s.
+- **macOS package job:** 26.4 min before, 15.5 min on #325's run and 23.1 min on the slower post-merge run.
+- **Windows package job:** 15.7 → 12.3 min. Windows native faults: 490 → 358 s.
+- **Quality checks:** 4.7 → 3.6 min. Coverage run: 160 → 114 s.
+- **Renderer:** initial JavaScript fell from 1211.7 kB to 1010.4 kB (gzip 363.7 → 308.3 kB). A description keystroke re-renders 1 rail row instead of 200.
+- **Main process:** about 100 ms less to the first window load on Windows (measured on a dev build).
+- **Code:** #329 removed about 840 net lines; #333 removed Tailwind and two dependencies.
+
+Deferred, each with its own gate:
+
+- Apple Silicon-only packaging, part 2: only after a bridge release (#328) has been published and confirmed (see [release readiness](release-readiness.md)).
+- Thumbnails outside the snapshot (Phase 3, item 5): needs a short design first.
+- Recovery helper unification (Phase 4, item 5): waits for approval of the [recovery unification design](recovery-unification-design.md).
+- WebP/AVIF artwork conversion (Phase 3, item 6) and keeping `marked` and DOMPurify out of the startup bundle: not started.
+
+Follow-ups found during delivery:
+
+- **Data loss, high priority:** an inspector edit made before the active screenshot's draft finishes loading is dropped. The field shows the edit and the status says "Saved", but nothing is written. The cause is `markScreenshotDirty` in `src/renderer/app/useProjectPersistence.ts`, which returns early when no draft exists. It reproduces in a focused hook test, and it is the cause of the intermittent source-context walkthrough failure. If the image load fails, every inspector edit is dropped the same way. The fix must keep the pending patch, apply it when the draft loads, and show an error instead of "Saved" if loading fails. It needs an independent review and Windows native evidence.
+- **Intermittent CI failures:**
+  - The installer-lifecycle rollback test sometimes exits silently on Windows. It appeared after the script tests began running in parallel.
+  - On macOS, the `native-fault-smoke` "watch revision" unit test sometimes times out. Suspected cause: fs.watch start-up latency.
+  - The screenshot-comparison walkthrough sometimes focuses its zoom control before the control has rendered.
+- **Evidence check:** the downloaded fault-evidence manifest check confirms file integrity but not completeness. This predates the plan; the fault launcher itself still fails closed.
 
 ## Execution and completion
 
