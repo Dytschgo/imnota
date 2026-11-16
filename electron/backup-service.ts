@@ -1,7 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import JSZip from 'jszip';
 import { z } from 'zod';
 import {
   BACKUP_MANIFEST_VERSION,
@@ -910,6 +909,8 @@ export class BackupService {
       throw new Error(
         `This snapshot is ${totalSize} bytes; archive export is limited to ${this.maxExportBytes} bytes. Open the local history folder and copy the validated snapshot directory instead.`,
       );
+    // Loaded on first export: JSZip is not needed to start the application.
+    const { default: JSZip } = await import('jszip');
     const zip = new JSZip();
     zip.file('manifest.json', JSON.stringify(inspection.manifest, null, 2));
     for (const file of inspection.manifest.files) {
