@@ -193,8 +193,10 @@ This establishes replacement-process readiness, not renderer/UI health or a runt
 version handshake. The updater separately validates the installed release version;
 `ps` does not report the version running inside Electron.
 
-Run `node --test scripts/install.test.mjs` for synthetic releases, hostile metadata
-and download failures. The suite executes the real scripts with network and app
+Run `node --test scripts/install.linux.test.mjs scripts/install.macos.test.mjs scripts/install.windows.test.mjs`
+for synthetic releases, hostile metadata and download failures. Each platform has
+its own file, sharing `scripts/test-support/install-harness.mjs`, so `node --test`
+runs them in parallel. The suite executes the real scripts with network and app
 launch commands replaced. Git Bash on Windows exercises shell control flow; it
 does not replace native Linux or macOS installation evidence. No fixture launches
 a real installer or changes a personal installation.
