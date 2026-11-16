@@ -192,7 +192,7 @@ The audit found about 1,600–1,800 removable or mergeable lines out of about 85
    - Remove the legacy `exports:package` and `exports:annotated-image` ZIP export, together with its IPC contracts, preload methods and types. No UI uses it.
      - First move the smoke steps in `capture-smoke.ts` and `mixed-content-smoke.ts` to the real prompt-bundle export.
      - About 150 lines.
-   - Remove Tailwind (`tailwindcss`, `@tailwindcss/postcss`, `postcss.config.js`) and replace it with a short local reset and an `sr-only` rule.
+   - Done in [PR #333](https://github.com/Dytschgo/imnota/pull/333): remove Tailwind (`tailwindcss`, `@tailwindcss/postcss`, `postcss.config.js`) and replace it with a short local reset and an `sr-only` rule.
      - It currently supplies only those two things, and its source scan generates stray utilities such as `.collapse` and `.blur`.
      - Verify with the Windows visual baselines plus a macOS and Linux walkthrough screenshot review.
    - Remove the `recovery:save` write channel. The smoke test that needs a leftover legacy recovery file writes that file directly.
