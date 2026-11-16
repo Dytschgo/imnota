@@ -98,6 +98,10 @@ export async function exerciseSourceContext(
     throw new Error('Opt-in import did not persist its source timestamp.');
   await openProject();
   await driver.click({ selector: `[data-testid="screenshot-${recorded.id}"]` });
+  // Typing before the inspector shows this screenshot can land in a field that is then
+  // re-rendered for the new selection, losing the edit.
+  await driver.waitFor({ selector: `.shot-item.active [data-testid="screenshot-${recorded.id}"]` });
+  await driver.waitFor({ selector: '[data-testid="source-app"]' });
   await driver.fill({ selector: '[data-testid="source-app"]' }, 'Synthetic source app');
   await waitForSource(`source?.app === 'Synthetic source app'`);
   await driver.fill({ selector: '[data-testid="source-window-title"]' }, 'Synthetic source window');
