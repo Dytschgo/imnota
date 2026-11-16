@@ -66,8 +66,8 @@ import {
   type AnnotationChangeOptions,
   type NudgeBurst,
 } from '../canvas/undo-coalescing';
-import { pixelatedRegion } from '../pixelate';
-import { viewportForLayoutChange, zoomAt, type ViewportSize } from '../viewport';
+import { createPixelationCache } from '../canvas/pixelation-cache';
+import { viewportForLayoutChange, zoomAt, type Viewport, type ViewportSize } from '../viewport';
 import { viewportToReveal } from '../canvas/reveal';
 import { CanvasLoadState } from '../canvas/CanvasLoadState';
 import type { ToolChoice } from './Toolbar';
@@ -200,6 +200,11 @@ function annotationsStepNumber(count: number): number {
   return count + 1;
 }
 
+/** Copies a pen draft's mutable point buffer so rendered and committed strokes never alias it. */
+function snapshotDraft(draft: Annotation | null): Annotation | null {
+  return draft?.kind === 'pen' && draft.points ? { ...draft, points: draft.points.slice() } : draft;
+}
+
 export function AnnotationCanvas({
   image,
   loadFailed,
@@ -224,6 +229,13 @@ export function AnnotationCanvas({
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const [size, setSize] = useState({ width: 900, height: 600 });
   const [draft, setDraft] = useState<Annotation | null>(null);
+  /**
+   * The latest draft, ahead of `draft` while a frame is pending. Pointer input reads and writes this;
+   * React state follows once per animation frame. A pen draft's `points` here is a mutable buffer.
+   */
+  const draftRef = useRef<Annotation | null>(null);
+  const draftFrame = useRef<number | null>(null);
+  const penPoints = useRef<number[] | null>(null);
   const [cropBox, setCropBox] = useState<Annotation | null>(null);
   const cropTransformerRef = useRef<Konva.Transformer>(null);
   const cropping = tool === 'crop';
@@ -237,23 +249,22 @@ export function AnnotationCanvas({
         ])
       : sourceBounds;
   const { imageObj, decodeFailed, retryDecode } = useDecodedImage(image?.dataUrl);
-  const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
+  const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, scale: 1 });
+  /**
+   * The latest viewport, ahead of `viewport` while a frame is pending. Every pan, wheel, command,
+   * fit and reveal reads and writes this, so operations compose in the order they arrive.
+   */
   const viewportRef = useRef(viewport);
-  const wheelFrame = useRef<number | null>(null);
-  const pendingWheel = useRef<
-    | (
-        | { kind: 'pan'; dx: number; dy: number }
-        | { kind: 'zoom'; pointer: { x: number; y: number }; factor: number }
-      )[]
-    | null
-  >(null);
+  /** Pointer pan and wheel input render at most once per animation frame. */
+  const viewportFrame = useRef<number | null>(null);
   /** True once the user pans or zooms; a resize then preserves their view instead of refitting. */
   const userAdjustedViewport = useRef(false);
   const viewportLayout = useRef<{ filename: string; dataUrl: string; size: ViewportSize } | null>(null);
   const nudgeBurst = useRef<NudgeBurst | null>(null);
   const keyboardHelpId = useId();
   const [spaceHeld, setSpaceHeld] = useState(false);
-  const pan = useRef<{ x: number; y: number; originX: number; originY: number } | null>(null);
+  /** The pointer position a pan last applied; each move pans the latest viewport by the difference. */
+  const pan = useRef<{ x: number; y: number } | null>(null);
   const [editing, setEditing] = useState<EditingText | null>(null);
   const capturedPointer = useRef<number | null>(null);
   // Completion can emit both a shape/stage pointerclick and a compatibility tap.
@@ -267,10 +278,62 @@ export function AnnotationCanvas({
   const explicitEditorResize = useRef<{ id: string; size: AnnotationEditorResize } | null>(null);
   const editorResizeListenerCleanup = useRef<(() => void) | null>(null);
 
+  /** Replaces the draft immediately, dropping any frame-pending pointer update. */
+  const replaceDraft = useCallback((next: Annotation | null) => {
+    if (draftFrame.current !== null) cancelAnimationFrame(draftFrame.current);
+    draftFrame.current = null;
+    penPoints.current = null;
+    draftRef.current = next;
+    setDraft(next);
+  }, []);
+
+  /** Records pointer input now and renders it at most once per animation frame. */
+  const scheduleDraft = useCallback((next: Annotation) => {
+    draftRef.current = next;
+    if (draftFrame.current !== null) return;
+    draftFrame.current = requestAnimationFrame(() => {
+      draftFrame.current = null;
+      setDraft(snapshotDraft(draftRef.current));
+    });
+  }, []);
+
+  /** Records the latest viewport now and renders it at most once per animation frame. */
+  const scheduleViewport = useCallback((next: Viewport) => {
+    viewportRef.current = next;
+    if (viewportFrame.current !== null) return;
+    viewportFrame.current = requestAnimationFrame(() => {
+      viewportFrame.current = null;
+      setViewport(viewportRef.current);
+    });
+  }, []);
+
+  /** Renders a viewport now. Derive it from `viewportRef` so it includes input still waiting for its frame. */
+  const commitViewport = useCallback((next: Viewport) => {
+    if (viewportFrame.current !== null) cancelAnimationFrame(viewportFrame.current);
+    viewportFrame.current = null;
+    viewportRef.current = next;
+    setViewport(next);
+  }, []);
+
+  /** Renders frame-pending pan or wheel input now, so a gesture's last movement is never dropped. */
+  const flushViewportFrame = useCallback(() => {
+    if (viewportFrame.current !== null) commitViewport(viewportRef.current);
+  }, [commitViewport]);
+
+  useEffect(
+    () => () => {
+      if (draftFrame.current !== null) cancelAnimationFrame(draftFrame.current);
+      if (viewportFrame.current !== null) cancelAnimationFrame(viewportFrame.current);
+      draftFrame.current = null;
+      viewportFrame.current = null;
+    },
+    [],
+  );
+
   useEffect(() => {
     if (!cropping || !image) {
       setCropBox(null);
-      setDraft(null);
+      replaceDraft(null);
       return;
     }
     const bounds = exportBounds(image.width, image.height, annotations);
@@ -293,7 +356,7 @@ export function AnnotationCanvas({
       onMessage?.('Crop applied. The original image is preserved; Undo restores the previous crop.');
     }
     setCropBox(null);
-    setDraft(null);
+    replaceDraft(null);
     onTool?.('select');
     onSelect(null);
   }
@@ -326,15 +389,11 @@ export function AnnotationCanvas({
     transformer?.getLayer()?.batchDraw();
   }, [cropping, cropBox, draft, imageObj]);
 
-  useEffect(() => {
-    viewportRef.current = viewport;
-  }, [viewport]);
-
   useLayoutEffect(
     () => () => {
-      if (wheelFrame.current !== null) cancelAnimationFrame(wheelFrame.current);
-      wheelFrame.current = null;
-      pendingWheel.current = null;
+      // Input for the previous screenshot is dropped; the layout effect below refits the next one.
+      if (viewportFrame.current !== null) cancelAnimationFrame(viewportFrame.current);
+      viewportFrame.current = null;
     },
     [image?.filename, image?.dataUrl],
   );
@@ -362,13 +421,11 @@ export function AnnotationCanvas({
       if (shiftX || shiftY) {
         userAdjustedViewport.current = true;
         const scale = viewportRef.current.scale;
-        const next = {
+        commitViewport({
           ...viewportRef.current,
           x: viewportRef.current.x - shiftX,
           y: viewportRef.current.y - shiftY,
-        };
-        viewportRef.current = next;
-        setViewport(next);
+        });
         active.node.position({
           x: active.node.x() + shiftX / scale,
           y: active.node.y() + shiftY / scale,
@@ -377,7 +434,7 @@ export function AnnotationCanvas({
       }
       edgePanFrame.current = requestAnimationFrame(runEdgePan);
     },
-    [size, stopEdgePan],
+    [commitViewport, size, stopEdgePan],
   );
 
   const startEdgePan = useCallback(() => {
@@ -413,7 +470,7 @@ export function AnnotationCanvas({
         setSpaceHeld(true);
       }
       if (event.key === 'Escape') {
-        setDraft(null);
+        replaceDraft(null);
         pan.current = null;
         onSelect(null);
       }
@@ -426,7 +483,7 @@ export function AnnotationCanvas({
     const blur = (event: FocusEvent) => {
       setSpaceHeld(false);
       pan.current = null;
-      setDraft(null);
+      replaceDraft(null);
       finalizePointerInteractionRef.current(event);
     };
     window.addEventListener('keydown', down);
@@ -437,7 +494,7 @@ export function AnnotationCanvas({
       window.removeEventListener('keyup', up);
       window.removeEventListener('blur', blur);
     };
-  }, [onSelect]);
+  }, [onSelect, replaceDraft]);
 
   useEffect(() => {
     const resizeObserver = new ResizeObserver(() => {
@@ -470,9 +527,8 @@ export function AnnotationCanvas({
       sameImage && userAdjustedViewport.current,
     );
     viewportLayout.current = { filename: image.filename, dataUrl: image.dataUrl, size };
-    viewportRef.current = next;
-    setViewport(next);
-  }, [image, size, sourceBounds.x, sourceBounds.y, sourceBounds.width, sourceBounds.height]);
+    commitViewport(next);
+  }, [commitViewport, image, size, sourceBounds.x, sourceBounds.y, sourceBounds.width, sourceBounds.height]);
 
   useEffect(() => {
     const container = stageRef.current?.container();
@@ -481,19 +537,21 @@ export function AnnotationCanvas({
       const command = canvasCommandFromEvent(event);
       if (!command) return;
       userAdjustedViewport.current = command !== 'fit';
-      setViewport((current) => {
-        const next = viewportForCanvasCommand(current, command, size, {
-          width: sourceBounds.width,
-          height: sourceBounds.height,
-        });
-        return command === 'fit' || command === 'actual-size'
-          ? { ...next, x: next.x - sourceBounds.x * next.scale, y: next.y - sourceBounds.y * next.scale }
-          : next;
+      // Start from the latest viewport, including a pan or wheel frame still waiting to render.
+      const next = viewportForCanvasCommand(viewportRef.current, command, size, {
+        width: sourceBounds.width,
+        height: sourceBounds.height,
       });
+      commitViewport(
+        command === 'fit' || command === 'actual-size'
+          ? { ...next, x: next.x - sourceBounds.x * next.scale, y: next.y - sourceBounds.y * next.scale }
+          : next,
+      );
     };
     container.addEventListener(CANVAS_COMMAND_EVENT, handleCommand);
     return () => container.removeEventListener(CANVAS_COMMAND_EVENT, handleCommand);
   }, [
+    commitViewport,
     image,
     imageObj,
     size,
@@ -522,42 +580,49 @@ export function AnnotationCanvas({
         if (attempts < 120) frame = requestAnimationFrame(reveal);
         return;
       }
-      const rect = node.getClientRect({ relativeTo: stage });
-      const current = viewportRef.current;
-      const next = viewportToReveal(
-        {
-          x: (rect.x - current.x) / current.scale,
-          y: (rect.y - current.y) / current.scale,
-          width: rect.width / current.scale,
-          height: rect.height / current.scale,
-        },
-        size,
-      );
+      // Measure in image coordinates, relative to the layer's view-transform group, so the bounds do not
+      // depend on whichever viewport was last drawn while newer pan or wheel input waits for its frame.
+      const layer = node.getLayer();
+      let view: Konva.Node = node;
+      while (view.getParent() && view.getParent() !== layer) view = view.getParent()!;
       revealedMatch.current = key;
-      viewportRef.current = next;
-      setViewport(next);
+      commitViewport(viewportToReveal(node.getClientRect({ relativeTo: view as Konva.Container }), size));
     };
     frame = requestAnimationFrame(reveal);
     return () => cancelAnimationFrame(frame);
-  }, [revealAnnotationId, annotations, image, imageObj, size, stageRef]);
+  }, [commitViewport, revealAnnotationId, annotations, image, imageObj, size, stageRef]);
 
+  const [pixelationCache] = useState(createPixelationCache);
+  // Only a region whose image, bounds or block size changed is rebuilt; drawing a draft rebuilds just its own.
   const pixelated = useMemo(
     () =>
-      new Map(
-        imageObj
-          ? [...annotations, ...(draft ? [draft] : [])]
-              .filter((annotation) => annotation.kind === 'pixelate')
-              .map((annotation) => [annotation.id, pixelatedRegion(imageObj, annotation)])
-          : [],
-      ),
-    [annotations, draft, imageObj],
+      imageObj
+        ? pixelationCache.regions(imageObj, draft ? [...annotations, draft] : annotations)
+        : new Map<string, HTMLCanvasElement>(),
+    [annotations, draft, imageObj, pixelationCache],
   );
+  // Release replaced and removed regions only after the canvases that replace them are committed.
+  useEffect(() => pixelationCache.retain(pixelated), [pixelated, pixelationCache]);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      // Strict Mode remounts at once; release the regions only when the canvas is really gone.
+      queueMicrotask(() => {
+        if (!mounted.current) pixelationCache.clear();
+      });
+    };
+  }, [pixelationCache]);
   const noteNumbers = useMemo(() => textAnnotationNoteNumbers(annotations), [annotations]);
 
   useEffect(() => {
     const transformer = transformerRef.current;
     if (!transformer) return;
-    const selected = transformer.getStage()?.findOne(`#${selectedId ?? ''}`);
+    // A bare `#` selector would match every node without an id, starting with the screenshot layer.
+    const selected = selectedId
+      ? transformer.getStage()?.findOne((node: Konva.Node) => node.id() === selectedId)
+      : undefined;
     transformer.nodes(selected ? [selected] : []);
     transformer.getLayer()?.batchDraw();
   }, [annotations, selectedId]);
@@ -657,7 +722,8 @@ export function AnnotationCanvas({
   function abortPointerInteraction(event?: Event) {
     finalizePointerInteraction(event);
     pan.current = null;
-    setDraft(null);
+    flushViewportFrame();
+    replaceDraft(null);
   }
 
   finalizePointerInteractionRef.current = abortPointerInteraction;
@@ -742,8 +808,7 @@ export function AnnotationCanvas({
     const stage = event.target.getStage();
     if (event.evt.button === 1 || spaceHeld || (tool === 'select' && event.target === stage)) {
       event.evt.preventDefault();
-      if (pointer)
-        pan.current = { ...pointer, originX: viewportRef.current.x, originY: viewportRef.current.y };
+      if (pointer) pan.current = pointer;
       return;
     }
     if (event.evt.button !== 0 || event.target.getParent()?.className === 'Transformer') return;
@@ -754,7 +819,7 @@ export function AnnotationCanvas({
       createTextAt(point);
       return;
     }
-    setDraft(
+    replaceDraft(
       createDefaultAnnotation(
         tool,
         point.x,
@@ -772,40 +837,42 @@ export function AnnotationCanvas({
     const pointer = localPointer(event.evt);
     if (pointer) pointerPosition.current = pointer;
     if (pan.current && pointer) {
-      const next = {
-        ...viewportRef.current,
-        x: pan.current.originX + pointer.x - pan.current.x,
-        y: pan.current.originY + pointer.y - pan.current.y,
-      };
+      const latest = viewportRef.current;
+      const from = pan.current;
+      pan.current = pointer;
       userAdjustedViewport.current = true;
-      viewportRef.current = next;
-      setViewport(next);
+      scheduleViewport({ ...latest, x: latest.x + pointer.x - from.x, y: latest.y + pointer.y - from.y });
       return;
     }
-    if (!draft || ['callout', 'step'].includes(draft.kind)) return;
+    const current = draftRef.current;
+    if (!current || ['callout', 'step'].includes(current.kind)) return;
     const point = imagePoint(event.evt);
     if (!point) return;
     // Shift snaps lines and arrows to 45° steps and makes boxes square; without it the delta is untouched.
     const delta = constrainDraftDelta(
-      draft.kind,
-      { x: point.x - draft.x, y: point.y - draft.y },
+      current.kind,
+      { x: point.x - current.x, y: point.y - current.y },
       event.evt.shiftKey,
     );
-    if (draft.kind === 'pen')
-      setDraft({
-        ...draft,
-        points: [...(draft.points ?? [0, 0]), delta.x, delta.y],
+    if (current.kind === 'pen') {
+      // Append to one buffer instead of copying the whole stroke on every move.
+      let points = penPoints.current;
+      if (!points || current.points !== points) points = penPoints.current = [...(current.points ?? [0, 0])];
+      points.push(delta.x, delta.y);
+      scheduleDraft({
+        ...current,
+        points,
         width: Math.max(4, Math.abs(delta.x)),
         height: Math.max(4, Math.abs(delta.y)),
       });
-    else if (draft.kind === 'arrow' || draft.kind === 'line')
-      setDraft({
-        ...draft,
+    } else if (current.kind === 'arrow' || current.kind === 'line')
+      scheduleDraft({
+        ...current,
         points: [0, 0, delta.x, delta.y],
         width: Math.abs(delta.x),
         height: Math.abs(delta.y),
       });
-    else setDraft({ ...draft, width: delta.x, height: delta.y });
+    else scheduleDraft({ ...current, width: delta.x, height: delta.y });
   }
 
   function endPointer(event: Konva.KonvaEventObject<PointerEvent>) {
@@ -820,21 +887,24 @@ export function AnnotationCanvas({
     if (wasDragging) return;
     if (pan.current) {
       pan.current = null;
+      flushViewportFrame();
       return;
     }
-    if (!draft) return;
+    // The latest pointer input, including any move still waiting for its frame.
+    const current = snapshotDraft(draftRef.current);
+    if (!current) return;
     if (
-      Math.abs(draft.width ?? 0) < 4 &&
-      Math.abs(draft.height ?? 0) < 4 &&
-      !['callout', 'step'].includes(draft.kind)
+      Math.abs(current.width ?? 0) < 4 &&
+      Math.abs(current.height ?? 0) < 4 &&
+      !['callout', 'step'].includes(current.kind)
     ) {
-      setDraft(null);
+      replaceDraft(null);
       return;
     }
-    const completed = normalizeAnnotationBounds(draft);
+    const completed = normalizeAnnotationBounds(current);
     if (completed.kind === 'crop') {
       setCropBox({ ...completed, id: 'crop-preview' });
-      setDraft(null);
+      replaceDraft(null);
       return;
     }
     // The completion click can hit the stage or an older shape under the new mark.
@@ -845,7 +915,7 @@ export function AnnotationCanvas({
       onSelect(completed.id);
       onTool?.('select');
     }
-    setDraft(null);
+    replaceDraft(null);
   }
 
   function handleCanvasKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
@@ -1147,6 +1217,10 @@ export function AnnotationCanvas({
     ? textAnnotationLayout({ ...editedAnnotation, text: editing?.text ?? editedAnnotation.text }, measureText)
     : null;
   const editorPresentation = editedLayout ? textEditorPresentationSize(editedLayout, viewport.scale) : null;
+  const viewTransform = { x: viewport.x, y: viewport.y, scaleX: viewport.scale, scaleY: viewport.scale };
+  const sortedAnnotations = annotations
+    .filter((annotation) => annotation.kind !== 'crop')
+    .sort((left, right) => left.zIndex - right.zIndex);
 
   return (
     <div
@@ -1206,47 +1280,41 @@ export function AnnotationCanvas({
           }}
           onWheel={(event) => {
             event.evt.preventDefault();
-            const pending = (pendingWheel.current ??= []);
+            // Each event applies, with its own zoom clamp, on top of the latest viewport.
+            const latest = viewportRef.current;
+            let next: Viewport;
             if (event.evt.ctrlKey || event.evt.metaKey) {
               const pointer = event.target.getStage()?.getPointerPosition();
               if (!pointer) return;
-              pending.push({ kind: 'zoom', pointer, factor: Math.exp(-event.evt.deltaY * 0.01) });
+              next = zoomAt(latest, pointer, Math.exp(-event.evt.deltaY * 0.01));
             } else {
-              pending.push({ kind: 'pan', dx: event.evt.deltaX, dy: event.evt.deltaY });
+              next = { ...latest, x: latest.x - event.evt.deltaX, y: latest.y - event.evt.deltaY };
             }
             userAdjustedViewport.current = true;
-            if (wheelFrame.current === null) {
-              wheelFrame.current = requestAnimationFrame(() => {
-                wheelFrame.current = null;
-                const input = pendingWheel.current;
-                pendingWheel.current = null;
-                if (!input) return;
-                setViewport((current) =>
-                  input.reduce(
-                    (viewport, operation) =>
-                      operation.kind === 'pan'
-                        ? { ...viewport, x: viewport.x - operation.dx, y: viewport.y - operation.dy }
-                        : zoomAt(viewport, operation.pointer, operation.factor),
-                    current,
-                  ),
-                );
-              });
-            }
+            scheduleViewport(next);
           }}
           onPointerClick={(event) => {
             if (createdInPointerGesture.current) return;
             if (event.target === event.target.getStage()) onSelect(null);
           }}
         >
-          <Layer>
-            <Group x={viewport.x} y={viewport.y} scaleX={viewport.scale} scaleY={viewport.scale}>
+          {/*
+            Three layers, bottom to top, so a draft frame redraws only the top canvas: the full-resolution
+            screenshot (never hit-tested), saved annotations, then the draft, crop overlay and transformers.
+            The screenshot stays the first stage canvas, which native smoke checks sample for image pixels.
+          */}
+          <Layer listening={false}>
+            <Group {...viewTransform}>
               <KonvaImage image={imageObj} {...sourceBounds} crop={sourceBounds} listening={false} />
-              <Group listening={!cropping}>
-                {[...annotations]
-                  .filter((annotation) => annotation.kind !== 'crop')
-                  .sort((left, right) => left.zIndex - right.zIndex)
-                  .map(renderAnnotation)}
-              </Group>
+            </Group>
+          </Layer>
+          <Layer>
+            <Group {...viewTransform} listening={!cropping}>
+              {sortedAnnotations.map(renderAnnotation)}
+            </Group>
+          </Layer>
+          <Layer>
+            <Group {...viewTransform}>
               {draft && draft.kind !== 'crop' && renderAnnotation(normalizeAnnotationBounds(draft))}
               {cropping && image && (cropBox || draft?.kind === 'crop') && (
                 <>
@@ -1448,7 +1516,7 @@ export function AnnotationCanvas({
             type="button"
             onClick={() => {
               setCropBox(null);
-              setDraft(null);
+              replaceDraft(null);
             }}
           >
             Draw new crop
