@@ -8,7 +8,7 @@ Start here when you need to understand the repository. `AGENTS.md` is the bindin
 - [Development](development.md) — local setup, quality commands and isolated native verification.
 - [Architecture](architecture.md) — runtime boundaries, persistence, export and sharing responsibilities.
 - [Data format](data-format.md) and [mixed-content model](mixed-content-model.md) — schemas, migrations and item contracts.
-- [User guide](user-guide.md) and [troubleshooting](troubleshooting.md) — current user-visible behaviour and known limits.
+- [User guide](user-guide.md) and [troubleshooting](troubleshooting.md) — current user-visible behaviour and known limits. [Side navigation](sidenav.md) details the sidebar, Recent and Pinned behaviour.
 - [Product roadmap](product-roadmap.md) — future product proposals and explicit boundaries.
 - [Release readiness](release-readiness.md), [nightly builds](nightly-builds.md) and [stable release CI](stable-release-ci.md) — release and publication gates.
 - [Nightly verification audit](nightly-verification-audit.md), [visual regression](visual-regression.md) and [verification timing](verification-timing.md) — evidence, visuals and test-loop history.
@@ -29,6 +29,7 @@ Start here when you need to understand the repository. `AGENTS.md` is the bindin
 - [Large-collection performance](large-collection-performance-plan.md) — measurement and scale plan; do not implement without budgets.
 - [Capture display matrix](capture-display-matrix.md) — real display-source evidence and outstanding overlay/alignment checks.
 - [Recovery unification design](recovery-unification-design.md) — one delete and Undo engine, failure contract and review slices; awaiting approval.
+- [Onboarding artwork prompts](onboarding-image-prompts.md) — optional future artwork prompts; the shipped onboarding needs no generated images.
 - [Windows copy comparison](windows-copy-comparison.md) — manual verification worksheet for the current clipboard/capture changes.
 
 ## Historical evidence
