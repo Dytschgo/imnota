@@ -275,10 +275,7 @@ function fixture(t) {
   fs.mkdirSync(path.join(root, 'tmp'));
   fs.writeFileSync(path.join(root, 'launches'), '');
   const digest = (archiveDigest ??= createHash('sha256').update(fs.readFileSync(archive)).digest('hex'));
-  fs.writeFileSync(
-    path.join(root, 'SHA256SUMS.txt'),
-    `${digest}  Imnota-mac.zip\n${digest}  ${archiveName}\n`,
-  );
+  fs.writeFileSync(path.join(root, 'SHA256SUMS.txt'), fixtureChecksums(digest, version));
   return { root, home, parent, app };
 }
 
@@ -307,6 +304,34 @@ function fixtureRelease(kind, candidateVersion) {
   const tag = `v${kind === 'install' ? candidateVersion.split('-')[0] : candidateVersion}`;
   return { tag, url: `https://github.com/Dytschgo/imnota/releases/download/${tag}` };
 }
+
+/**
+ * The quick installer runs against the stable-shaped fixture tag, and a real stable release
+ * lists its archive under that version, so list it there as well as under the candidate name
+ * the updater selects. A stable candidate has one name; listing it twice would be a duplicate.
+ */
+function fixtureChecksums(digest, candidateVersion) {
+  const names = new Set([
+    'Imnota-mac.zip',
+    `Imnota-${candidateVersion}-universal-mac.zip`,
+    `Imnota-${candidateVersion.split('-')[0]}-universal-mac.zip`,
+  ]);
+  return [...names].map((name) => `${digest}  ${name}\n`).join('');
+}
+
+test('native fixture checksums name the archive for both the quick installer and the updater', () => {
+  const digest = 'a'.repeat(64);
+  assert.equal(
+    fixtureChecksums(digest, '0.5.0'),
+    `${digest}  Imnota-mac.zip\n${digest}  Imnota-0.5.0-universal-mac.zip\n`,
+  );
+  const nightly = fixtureChecksums(digest, '0.5.1-nightly.20261116.43919322427').split('\n');
+  for (const name of [
+    'Imnota-0.5.1-nightly.20261116.43919322427-universal-mac.zip',
+    'Imnota-0.5.1-universal-mac.zip',
+  ])
+    assert.equal(nightly.filter((line) => line === `${digest}  ${name}`).length, 1, name);
+});
 
 test('native fixture keeps quick-install tags stable and updater identity exact for both channels', () => {
   for (const candidate of ['0.4.0', '0.4.1-nightly.20261015.123.2']) {
