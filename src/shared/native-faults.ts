@@ -106,6 +106,4 @@ export interface NativeFaultReceiver {
   onCommand(callback: (command: unknown) => void): () => void;
   report(observation: FaultObservation): void;
 }
-export const FAULT_QUEUED_NAME = 'Fixture queued metadata';
-export const FAULT_MARKDOWN = '# Fixture recovery\n\nfixture-draft-text\n';
-export const FAULT_DESCRIPTION = 'fixture-draft-shot';
+export { FAULT_DESCRIPTION, FAULT_MARKDOWN, FAULT_QUEUED_NAME } from './native-fault-fixtures.js';

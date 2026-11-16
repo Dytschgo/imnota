@@ -11,19 +11,7 @@ export const BACKUP_SNAPSHOT_REASONS = [
 
 export type BackupSnapshotReason = (typeof BACKUP_SNAPSHOT_REASONS)[number];
 
-export interface BackupPreferences {
-  enabled: boolean;
-  location: string;
-  retentionCount: number;
-  retentionAgeDays: number;
-}
-
-export const DEFAULT_BACKUP_PREFERENCES: BackupPreferences = {
-  enabled: false,
-  location: '',
-  retentionCount: 20,
-  retentionAgeDays: 90,
-};
+export { DEFAULT_BACKUP_PREFERENCES, type BackupPreferences } from './backup-preferences.js';
 
 export const backupPreferencesSchema = z
   .object({

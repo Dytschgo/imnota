@@ -16,7 +16,7 @@ import { CollectionRail } from '../collection/CollectionRail';
 import { AnnotationCanvas } from '../components/AnnotationCanvas';
 import type { AnnotationChangeOptions } from '../canvas/undo-coalescing';
 import { ErrorBoundary } from '../components/ErrorBoundary';
-import { NativeFaultProbe } from './native-fault-probe';
+import { NativeFaultProbe } from './native-fault-gate';
 import { Toolbar, type ToolChoice } from '../components/Toolbar';
 import { Button, EmptyState, IconButton } from '../components/ui';
 import { ScreenshotInspector } from '../inspector/ScreenshotInspector';

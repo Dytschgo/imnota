@@ -1,5 +1,5 @@
 import type { ShortcutBindings } from './shortcuts.js';
-import { DEFAULT_BACKUP_PREFERENCES, type BackupPreferences } from './backups.js';
+import { DEFAULT_BACKUP_PREFERENCES, type BackupPreferences } from './backup-preferences.js';
 
 export type AppearanceMode = 'system' | 'light' | 'dark';
 export type AccentPreset = 'graphite' | 'indigo' | 'emerald' | 'amber';

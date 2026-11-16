@@ -1,9 +1,14 @@
 import { z } from 'zod';
-import { screenshotSourceSchema } from './source-context.js';
+import { screenshotSourceSchema } from './source-context-schema.js';
 import type { ProjectData } from './types.js';
 import type { ContentItem } from './content-items.js';
 import { DEFAULT_EXPORT_PREFERENCES } from './utils.js';
 import { isProjectIconKey, PROJECT_ICON_KEYS } from './project-icons.js';
+import {
+  normalizeSharingSenderNameText,
+  sharingSenderNameTooLong,
+  sharingSenderNameUnprintable,
+} from './sharing-sender-name.js';
 
 export const filenameSchema = z
   .string()
@@ -361,10 +366,13 @@ export const annotationSchema = z.object({
 });
 export const sharingSenderNameSchema = z
   .string()
-  .transform((value) => value.normalize('NFC').trim())
-  .refine((value) => [...value].length <= 80, 'Sharing sender name must contain at most 80 characters.')
+  .transform(normalizeSharingSenderNameText)
   .refine(
-    (value) => !/[\p{C}\u202A-\u202E\u2066-\u2069]/u.test(value),
+    (value) => !sharingSenderNameTooLong(value),
+    'Sharing sender name must contain at most 80 characters.',
+  )
+  .refine(
+    (value) => !sharingSenderNameUnprintable(value),
     'Sharing sender name must contain printable characters.',
   );
 export const settingsPatchSchema = z

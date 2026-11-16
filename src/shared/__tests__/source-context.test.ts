@@ -4,9 +4,9 @@ import {
   appFromWindowTitle,
   cleanSourceUrl,
   createScreenshotSource,
-  screenshotSourceSchema,
   sourceMarkdownLines,
 } from '../source-context';
+import { screenshotSourceSchema } from '../source-context-schema';
 import { validateProject } from '../schema';
 import { emptyProject } from '../utils';
 

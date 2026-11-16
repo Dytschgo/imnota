@@ -1,5 +1,3 @@
-import { z } from 'zod';
-
 /**
  * Where a screenshot came from, recorded locally at capture or import. It is stored in
  * project.json with the screenshot and, while the setting is on, written into exported
@@ -51,37 +49,6 @@ export function cleanSourceUrl(value: string | null | undefined): string | undef
     return undefined;
   }
 }
-
-const optionalText = z
-  .string()
-  .max(SOURCE_TEXT_LIMIT)
-  .optional()
-  .catch(undefined)
-  .transform((value) => cleanSourceText(value));
-
-/** Lenient on read: a damaged source record is dropped instead of making the project unreadable. */
-export const screenshotSourceSchema = z
-  .object({
-    via: z.enum(['capture', 'import']),
-    capturedAt: z.iso.datetime({ offset: true }).max(40),
-    app: optionalText,
-    windowTitle: optionalText,
-    url: z
-      .string()
-      .max(SOURCE_URL_LIMIT)
-      .optional()
-      .catch(undefined)
-      .transform((value) => cleanSourceUrl(value)),
-    display: optionalText,
-  })
-  .transform((value) => {
-    const source: ScreenshotSource = { via: value.via, capturedAt: value.capturedAt };
-    if (value.app) source.app = value.app;
-    if (value.windowTitle) source.windowTitle = value.windowTitle;
-    if (value.url) source.url = value.url;
-    if (value.display) source.display = value.display;
-    return source;
-  });
 
 /**
  * Apps whose Windows title ends in a fixed " - <App>" suffix. Windows capture has the window

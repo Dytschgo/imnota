@@ -25,7 +25,7 @@ import type { RecentlyDeletedItem, RecentlyDeletedRestoreResult } from '../share
 import { nowIso } from '../shared/utils';
 import { orderedCollectionItems } from '../shared/content-items';
 import { useContentPersistence } from './content/useContentPersistence';
-import { AppDialogs, type AppDialog, type NewProjectDraft, type ProjectEditDraft } from './app/AppDialogs';
+import type { AppDialog, NewProjectDraft, ProjectEditDraft } from './app/AppDialogs';
 import { AppShell } from './app/AppShell';
 import { useAppearance } from './app/useAppearance';
 import { usePreferences } from './app/usePreferences';
@@ -38,10 +38,19 @@ import { ANNOTATION_UNDO_LIMIT, pushBounded } from './canvas/undo-history';
 import { Logo } from './components/Logo';
 import type { ToolChoice } from './components/Toolbar';
 import { Button, IconButton, Modal } from './components/ui';
-import { OnboardingDemo } from './onboarding';
-import { PromptBundleDialogHost } from './export/PromptBundleDialogHost';
+import {
+  AppDialogs,
+  CaptureDestinationDialog,
+  OnboardingDemo,
+  PromptBundleDialogHost,
+  SearchDialog,
+  SettingsView,
+  useDeferredSurfacePreload,
+  WhatsNewDialog,
+} from './app/lazy-surfaces';
 import { usePromptBundleController } from './export/usePromptBundleController';
-import { SETTINGS_CATEGORIES, SettingsView, useKeyboardShortcuts, type SettingsCategory } from './settings';
+import { SETTINGS_CATEGORIES, type SettingsCategory } from './settings/settings-categories';
+import { useKeyboardShortcuts } from './settings/useKeyboardShortcuts';
 import { useAppStore, type AppView } from './store';
 import {
   moveNavigationLocation,
@@ -58,14 +67,13 @@ import {
   registerNativeFaultAdapter,
   reportNativeFaultTransition,
   observeNativeFaultSave,
-} from './app/native-fault-probe';
-import { FAULT_DESCRIPTION, FAULT_MARKDOWN } from '../shared/native-faults';
-import { SearchDialog, type ProjectSearchScope, type ProjectSearchTarget } from './search';
+} from './app/native-fault-gate';
+import { FAULT_DESCRIPTION, FAULT_MARKDOWN } from '../shared/native-fault-fixtures';
+import type { ProjectSearchScope, ProjectSearchTarget } from './search';
 import './app/project-management.css';
 import { Library } from './app/Library';
 import { Welcome } from './app/Welcome';
 import { WorkflowRequestError, workflowValue } from './app/workflow';
-import { CaptureDestinationDialog } from './capture/CaptureDestinationDialog';
 import {
   captureDestinationChoices,
   currentCaptureDestination,
@@ -73,12 +81,11 @@ import {
   type CaptureDestination,
   type CaptureDestinationChoice,
 } from './capture/capture-destination';
-import { WhatsNewDialog, type WhatsNewAction } from './components/WhatsNew';
+import type { WhatsNewAction } from './components/WhatsNew';
 import { findWhatsNewRelease, shouldShowWhatsNew } from '../shared/whats-new';
 import { splitDiagnosticReference, userFacingErrorMessage } from './user-facing-error';
 
 export { CollectionControls } from './collection/CollectionRail';
-export { SettingsView } from './settings/SettingsView';
 
 interface SnapshotNotice {
   projectPath: string;
@@ -2186,6 +2193,7 @@ export default function App() {
     if (booting || preferences.loading) return;
     void window.imnota.captureRendererReady();
   }, [booting, preferences.loading]);
+  useDeferredSurfacePreload(!booting && !preferences.loading);
 
   if (booting || preferences.loading)
     return (

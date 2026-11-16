@@ -1,29 +1,29 @@
 import { isCommittedWriteWarning } from '../../shared/write-outcome';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { sharingSenderNameSchema } from '../../shared/schema';
+import {
+  normalizeSharingSenderNameText,
+  sharingSenderNameTooLong,
+  sharingSenderNameUnprintable,
+} from '../../shared/sharing-sender-name';
 import type { WorkspaceSettings } from '../../shared/types';
 import { useAppStore } from '../store';
 
 let settingsWriteQueue: Promise<void> = Promise.resolve();
 
 export function normalizeSharingSenderName(value: unknown): string {
-  return typeof value === 'string' ? value.normalize('NFC').trim() : '';
+  return typeof value === 'string' ? normalizeSharingSenderNameText(value) : '';
 }
 
+/** Accepts and rejects exactly what the settings schema does, without loading the schema library. */
 export function validateSharingSenderName(
   value: string,
 ): { ok: true; value: string } | { ok: false; error: string } {
-  const parsed = sharingSenderNameSchema.safeParse(value);
-  if (!parsed.success) {
-    const tooLong = [...normalizeSharingSenderName(value)].length > 80;
-    return {
-      ok: false,
-      error: tooLong
-        ? 'Keep the sender name to 80 characters or fewer.'
-        : 'Use a plain sender name without control or formatting characters.',
-    };
-  }
-  return { ok: true, value: parsed.data };
+  const normalized = normalizeSharingSenderNameText(value);
+  if (sharingSenderNameTooLong(normalized))
+    return { ok: false, error: 'Keep the sender name to 80 characters or fewer.' };
+  if (sharingSenderNameUnprintable(normalized))
+    return { ok: false, error: 'Use a plain sender name without control or formatting characters.' };
+  return { ok: true, value: normalized };
 }
 
 /** Serializes settings writes so a slower earlier response cannot replace a newer preference. */
