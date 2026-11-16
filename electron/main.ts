@@ -91,7 +91,7 @@ import { discoverRelease, type ReleaseCandidate } from './releases.js';
 import { createCiReleaseMetadataRequest } from './release-metadata-request.js';
 import { prepareNativeUpdate } from './native-update.js';
 import { createNativeUpdaterLoader } from './native-updater-loader.js';
-import { terminalUpdateArguments } from './terminal-update.js';
+import { detectMacHost, terminalUpdateArguments } from './terminal-update.js';
 import { startMacUpdate, type MacUpdateSession } from './macos-update.js';
 import { promptCollectionGrant, PromptBundleWorkflow } from './prompt-bundle-workflow.js';
 import { HostedShareClient } from './hosted-share-client.js';
@@ -2151,6 +2151,7 @@ function configureAutoUpdates(): void {
   // verifies in the background, then replaces and reopens the app once it quits.
   const macHelper = process.platform === 'darwin';
   const macAppPath = () => path.resolve(app.getPath('exe'), '../../..');
+  const macHost = detectMacHost(process.arch, macHelper && app.runningUnderARM64Translation);
   let macRelease: ReleaseCandidate | null = null;
   let macSession: MacUpdateSession | null = null;
   updateController = new UpdateController(settings.updateChannel, {
@@ -2163,7 +2164,7 @@ function configureAutoUpdates(): void {
     prepare: macHelper
       ? async (release) => {
           macRelease = null;
-          terminalUpdateArguments(release, macAppPath(), app.getVersion());
+          terminalUpdateArguments(release, macAppPath(), app.getVersion(), macHost);
           macRelease = release;
         }
       : async (release, channel) => prepareNativeUpdate(await nativeUpdater.load(), release, channel),
@@ -2180,6 +2181,7 @@ function configureAutoUpdates(): void {
               observerPath: path.join(process.resourcesPath, 'imnota-security-observer'),
               cachePath: app.getPath('temp'),
               currentVersion: app.getVersion(),
+              host: macHost,
             },
             {
               progress: (percent) => updateController.progress(percent),
