@@ -196,6 +196,17 @@ describe('closed packaged native fault gate', () => {
       // and the manifest check fail the job.
       assert.equal(firstDownload.id, 'native_fault_download_first');
       assert.equal(firstDownload['continue-on-error'], true);
+      assert.equal(firstDownload.if, "always() && steps.native_fault_upload.outcome == 'success'");
+      const wait = packageJob.steps.find(
+        (step) => step.name === 'Wait before retrying the evidence download',
+      );
+      assert.equal(wait.if, "always() && steps.native_fault_download_first.outcome == 'failure'");
+      assert.equal(wait.run, 'sleep 15');
+      const order = [firstDownload, wait, download, verify].map((step) => packageJob.steps.indexOf(step));
+      assert.deepEqual(
+        order,
+        [...order].sort((left, right) => left - right),
+      );
       assert.equal(firstDownload.uses, download.uses);
       assert.equal(firstDownload.with['artifact-ids'], download.with['artifact-ids']);
       assert.equal(firstDownload.with.path, download.with.path);
