@@ -177,6 +177,9 @@ describe('closed packaged native fault gate', () => {
       const download = packageJob.steps.find(
         (step) => step.name === 'Download native fault evidence for manifest verification',
       );
+      const firstDownload = packageJob.steps.find(
+        (step) => step.name === 'Download native fault evidence (first attempt)',
+      );
       const verify = packageJob.steps.find(
         (step) => step.name === 'Verify downloaded native fault evidence manifest',
       );
@@ -189,7 +192,20 @@ describe('closed packaged native fault gate', () => {
       assert.equal(download.with.repository, undefined);
       assert.equal(download.with.name, undefined);
       assert.equal(download.id, 'native_fault_download');
-      assert.equal(verify.if, "always() && steps.native_fault_download.outcome == 'success'");
+      // Only the first attempt may fail softly; the retry runs exactly when it failed, and it
+      // and the manifest check fail the job.
+      assert.equal(firstDownload.id, 'native_fault_download_first');
+      assert.equal(firstDownload['continue-on-error'], true);
+      assert.equal(firstDownload.uses, download.uses);
+      assert.equal(firstDownload.with['artifact-ids'], download.with['artifact-ids']);
+      assert.equal(firstDownload.with.path, download.with.path);
+      assert.equal(firstDownload.with['github-token'], undefined);
+      assert.equal(firstDownload.with['run-id'], undefined);
+      assert.equal(download.if, "always() && steps.native_fault_download_first.outcome == 'failure'");
+      assert.equal(
+        verify.if,
+        "always() && (steps.native_fault_download_first.outcome == 'success' || steps.native_fault_download.outcome == 'success')",
+      );
       assert.notEqual(download['continue-on-error'], true);
       assert.notEqual(verify['continue-on-error'], true);
       if (name === 'nightly') {
