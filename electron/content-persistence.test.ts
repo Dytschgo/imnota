@@ -964,4 +964,32 @@ describe('drawing PNG structural messages', () => {
     aliasedHeader[12] = 0xc9;
     expect(() => drawingPngDimensions(aliasedHeader)).toThrow('Drawing image is not a valid PNG.');
   });
+
+  it('rejects an oversized drawing data URL with its size message before decoding it', async () => {
+    const { projectPath, service } = await fixture();
+    const created = await service.create({ projectPath, collectionId: '001-collection', kind: 'drawing' });
+    const item = created.project.contentItems![0];
+    const loaded = await service.load({ projectPath, itemId: item.id });
+    const save = (dataUrl: string) =>
+      service.save({
+        projectPath,
+        itemId: item.id,
+        contentRevision: loaded.contentRevision,
+        source: loaded.source!,
+        image: { ...loaded.image!, dataUrl },
+      });
+    // 'A' * n decodes to floor(3n / 4) bytes: this is one character past the longest
+    // payload that still fits in 100,000,000 bytes, with room for two '=' characters.
+    const oversized = `data:image/png;base64,${'A'.repeat(133_333_335)}==`;
+    const decodes = vi.spyOn(Buffer, 'from');
+    await expect(save(oversized)).rejects.toThrow('Drawing PNG is too large.');
+    await expect(save(`data:image/png;base64,${'*'.repeat(133_333_337)}`)).rejects.toThrow(
+      'Drawing PNG is too large.',
+    );
+    expect(decodes.mock.calls.filter((call: unknown[]) => call[1] === 'base64')).toEqual([]);
+    decodes.mockRestore();
+    await expect(save('data:image/png;base64,AA AA')).rejects.toThrow(
+      'Drawing image must be a base64 PNG data URL.',
+    );
+  });
 });

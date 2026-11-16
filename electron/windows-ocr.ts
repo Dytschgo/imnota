@@ -4,13 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { hasPngSignature } from '../src/shared/png.js';
-import { decodePngDataUrl, PNG_DATA_URL_PREFIX } from './png-data-url.js';
+import { decodePngDataUrl, maxPngDataUrlLength } from './png-data-url.js';
 
 const execFileDefault = promisify(execFileCallback);
 
 /** Keep OCR off the export critical path for huge captures; Copy Bundle still succeeds. */
 export const MAX_OCR_PNG_BYTES = 20 * 1024 * 1024;
-export const MAX_OCR_DATA_URL_CHARACTERS = PNG_DATA_URL_PREFIX.length + Math.ceil(MAX_OCR_PNG_BYTES / 3) * 4;
+export const MAX_OCR_DATA_URL_CHARACTERS = maxPngDataUrlLength(MAX_OCR_PNG_BYTES);
 export const WINDOWS_OCR_TIMEOUT_MS = 10_000;
 
 export const WINDOWS_OCR_SCRIPT = [
@@ -91,7 +91,7 @@ function windowsPowershellPath(): string {
 
 export function decodePngDataUrlForOcr(pngDataUrl: string): Uint8Array | undefined {
   if (typeof pngDataUrl !== 'string' || pngDataUrl.length > MAX_OCR_DATA_URL_CHARACTERS) return undefined;
-  const png = decodePngDataUrl(pngDataUrl);
+  const png = decodePngDataUrl(pngDataUrl, MAX_OCR_DATA_URL_CHARACTERS);
   return png && png.length <= MAX_OCR_PNG_BYTES && hasPngSignature(png) ? png : undefined;
 }
 

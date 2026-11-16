@@ -18,7 +18,7 @@ import {
   type PngValidationFailure,
   type PngValidationPolicy,
 } from '../src/shared/png.js';
-import { decodePngDataUrl } from './png-data-url.js';
+import { decodePngDataUrl, PNG_DATA_URL_PREFIX } from './png-data-url.js';
 import { assertNoLinks, atomicWrite, isWithin } from './files.js';
 import {
   screenshotTransactionBaseline,
@@ -50,6 +50,10 @@ const MAX_MARKDOWN_BYTES = 2_000_000;
 const MAX_DRAWING_SOURCE_BYTES = 20_000_000;
 const MAX_DRAWING_PNG_BYTES = 100_000_000;
 const MAX_DRAWING_PIXELS = 40_000_000;
+// Longest data URL the decoder accepts that can still hold at most MAX_DRAWING_PNG_BYTES:
+// unpadded or non-canonical payload characters plus two '=' (floor(3n / 4) <= limit).
+const MAX_DRAWING_PNG_DATA_URL_LENGTH =
+  PNG_DATA_URL_PREFIX.length + Math.ceil(((MAX_DRAWING_PNG_BYTES + 1) * 4) / 3) - 1 + 2;
 
 export const EMPTY_EXCALIDRAW_SOURCE = JSON.stringify(
   {
@@ -209,7 +213,10 @@ export function drawingPngDimensions(value: Uint8Array): { width: number; height
 function parsePngPayload(image: ImagePayload, expectedFilename: string): Buffer {
   filenameSchema.parse(image.filename);
   if (image.filename !== expectedFilename) throw new Error('Drawing image filename does not match its item.');
-  const value = decodePngDataUrl(image.dataUrl);
+  // Any accepted data URL longer than this decodes to more than the byte limit.
+  if (typeof image.dataUrl === 'string' && image.dataUrl.length > MAX_DRAWING_PNG_DATA_URL_LENGTH)
+    throw new Error('Drawing PNG is too large.');
+  const value = decodePngDataUrl(image.dataUrl, MAX_DRAWING_PNG_DATA_URL_LENGTH);
   if (!value) throw new Error('Drawing image must be a base64 PNG data URL.');
   if (value.byteLength > MAX_DRAWING_PNG_BYTES) throw new Error('Drawing PNG is too large.');
   const dimensions = drawingPngDimensions(value);

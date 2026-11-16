@@ -1,6 +1,7 @@
 import { filenameSchema } from '../src/shared/schema.js';
 import {
   pathInput,
+  pngDataUrlInput,
   workflowBundleNumber,
   workflowManifest,
   workflowSessionId,
@@ -15,7 +16,6 @@ import path from 'node:path';
 import { promptBundleId } from './prompt-bundle-identity.js';
 import { isWithin } from './files.js';
 import { NativeWorkflowError } from './workflow-errors.js';
-import { isPngDataUrl } from './png-data-url.js';
 
 export function registerPromptExportIpc(router: IpcRouter, host: IpcHost): void {
   const { handleWorkflow } = router;
@@ -87,11 +87,7 @@ export function registerPromptExportIpc(router: IpcRouter, host: IpcHost): void 
             .object({
               sessionId: workflowSessionId,
               bundleNumber: workflowBundleNumber,
-              pngDataUrl: z
-                .string()
-                .max(134_000_000)
-                .refine(isPngDataUrl, { message: 'Expected a base64 PNG data URL.' })
-                .optional(),
+              pngDataUrl: pngDataUrlInput(134_000_000).optional(),
               markdown: z.string().min(1).max(2_000_000),
               sourceAssets: z
                 .array(

@@ -23,11 +23,10 @@ import {
   type StoredPromptBundle,
 } from './prompt-bundle-store.js';
 import { clipboardFailure, filesystemFailure, NativeWorkflowError } from './workflow-errors.js';
-import { decodePngDataUrl, PNG_DATA_URL_PREFIX } from './png-data-url.js';
+import { decodePngDataUrl, maxPngDataUrlLength, PNG_DATA_URL_PREFIX } from './png-data-url.js';
 import { formatTerminalHandoff, TerminalPathError } from '../src/shared/terminal-handoff.js';
 
-const MAX_PNG_DATA_URL_CHARACTERS =
-  PNG_DATA_URL_PREFIX.length + Math.ceil(MAX_PROMPT_BUNDLE_PNG_BYTES / 3) * 4;
+const MAX_PNG_DATA_URL_CHARACTERS = maxPngDataUrlLength(MAX_PROMPT_BUNDLE_PNG_BYTES);
 const MAX_FINALIZED_GRANTS = 128;
 
 export interface AuthorizedPromptCollection {
@@ -107,7 +106,7 @@ function publicFinalized(result: FinalizedPromptBundleSession): PromptExportFina
 function promptPngFromDataUrl(dataUrl: string): Uint8Array {
   if (typeof dataUrl !== 'string' || dataUrl.length > MAX_PNG_DATA_URL_CHARACTERS)
     throw new NativeWorkflowError('invalid-input', 'Prompt PNG is empty or too large.');
-  const png = decodePngDataUrl(dataUrl);
+  const png = decodePngDataUrl(dataUrl, MAX_PNG_DATA_URL_CHARACTERS);
   if (!png) throw new NativeWorkflowError('invalid-input', 'Prompt image must be a PNG data URL.');
   return png;
 }

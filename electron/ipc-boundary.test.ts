@@ -1188,6 +1188,70 @@ describe('invalid payloads by handler module', () => {
   });
 });
 
+describe('oversized PNG data URLs', () => {
+  // Valid base64 apart from length, so only the length limit can reject them.
+  const oversized = (length: number) => `data:image/png;base64,${'A'.repeat(length - 22)}`;
+  const base64Decodes = (spy: { mock: { calls: unknown[][] } }) =>
+    spy.mock.calls.filter((call) => call[1] === 'base64');
+
+  it.each([
+    ['system:copy-image', [oversized(100_000_001)], z.tuple([z.string().max(100_000_000)])],
+    [
+      'system:copy-context',
+      [{ markdown: 'a', imageDataUrl: oversized(100_000_001) }],
+      z.tuple([
+        z
+          .object({ markdown: z.string(), imageDataUrl: z.string().max(100_000_000).max(32_000_000) })
+          .strict(),
+      ]),
+    ],
+    [
+      'onboarding:prepare-handoff',
+      [
+        {
+          markdown: 'a',
+          imageDataUrl: oversized(32_000_001),
+          markdownFilename: 'component-search.md',
+          pngFilename: 'component-search.png',
+        },
+      ],
+      z.tuple([z.object({ imageDataUrl: z.string().max(100_000_000).max(32_000_000) }).passthrough()]),
+    ],
+  ] as const)('%s reports only the length issue and never decodes', async (channel, args, lengthOnly) => {
+    const spy = vi.spyOn(Buffer, 'from');
+    try {
+      const parsed = contracts[channel].safeParse(args);
+      expect(parsed.success).toBe(false);
+      expect(parsed.error?.issues).toEqual(lengthOnly.safeParse(args).error?.issues);
+      await expect(entry(channel).invoke(trusted, ...args)).rejects.toMatchObject({ name: 'ZodError' });
+      expect(base64Decodes(spy)).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(reached).toEqual([]);
+  });
+
+  it('rejects an oversized prompt export image without decoding it', async () => {
+    const spy = vi.spyOn(Buffer, 'from');
+    try {
+      const outcome = await entry('workflow:prompt-export:write').invoke(trusted, {
+        sessionId,
+        bundleNumber: 1,
+        pngDataUrl: oversized(134_000_001),
+        markdown: 'a',
+      });
+      expect(failure(outcome)).toMatchObject({
+        ok: false,
+        error: { code: 'invalid-input', message: 'The request contains invalid or unsupported values.' },
+      });
+      expect(base64Decodes(spy)).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(reached).toEqual([]);
+  });
+});
+
 describe('workspace-scoped handlers in ipc-system.ts and ipc-projects.ts', () => {
   const open = (target: string) => entry('system:open-path').invoke(trusted, target);
 
