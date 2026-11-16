@@ -32,6 +32,7 @@ import {
   validatePromptBundlePng,
 } from './prompt-bundle-store.js';
 import { listWorkspaceProjects } from './project-list.js';
+import { readPngHeader } from '../src/shared/png.js';
 import { assertProjectPath } from './project-path.js';
 
 export const BUNDLE_NOT_PREPARED = 'bundle not prepared';
@@ -46,7 +47,6 @@ export const BUNDLE_NOT_FOUND = 'bundle not found';
 const EXPORT_SET_NAME = /^.+ - (\d{2})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/su;
 const BUNDLE_FILE_SUFFIX = /^(\d{2,3})\.(md|png)$/;
 const BUNDLE_ID = /^b_[0-9a-f]{32}$/;
-const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
 /**
  * Five minutes accommodates small clock corrections and ordinary one-second export-name
  * reservations. Names use local time, parsed in this machine's zone just like the writer.
@@ -394,9 +394,10 @@ async function readBoundedImage(target: string, maximumBytes: number): Promise<B
 
 /** Signature, chunk integrity and dimension limits, using the checks applied when bundles are stored. */
 function isValidPng(png: Buffer): boolean {
-  if (png.length < 24 || PNG_SIGNATURE.some((byte, index) => png[index] !== byte)) return false;
+  const header = readPngHeader(png);
+  if (!header) return false;
   try {
-    validatePromptBundlePng(png, { width: png.readUInt32BE(16), height: png.readUInt32BE(20) });
+    validatePromptBundlePng(png, header);
     return true;
   } catch {
     return false;

@@ -1,6 +1,6 @@
-import { createRequire } from 'node:module';
 import type { CaptureRectangle } from '../src/shared/capture.js';
 import type { NativeCaptureWindow } from './capture-windows.js';
+import { loadKoffi, type KoffiLibrary } from './koffi.js';
 
 const GWL_EXSTYLE = -20;
 const WS_EX_TOOLWINDOW = 0x00000080;
@@ -11,14 +11,6 @@ const GW_HWNDNEXT = 2;
 const MAX_ENUMERATED_WINDOWS = 512;
 
 type NativeHandle = unknown;
-
-interface KoffiLibrary {
-  func(name: string, result: string, parameters: readonly string[]): (...args: unknown[]) => unknown;
-}
-
-interface KoffiModule {
-  load(name: string): KoffiLibrary;
-}
 
 interface WindowsWindowApi {
   getDesktopWindow(): NativeHandle;
@@ -50,21 +42,10 @@ function handleId(handle: NativeHandle): string {
   return String(numberResult(handle));
 }
 
-function loadKoffi(): KoffiModule {
-  const packageName =
-    process.arch === 'x64'
-      ? '@koromix/koffi-win32-x64'
-      : process.arch === 'arm64'
-        ? '@koromix/koffi-win32-arm64'
-        : undefined;
-  if (!packageName) throw new Error(`Window enumeration is unavailable on ${process.arch}.`);
-  return createRequire(import.meta.url)(packageName) as KoffiModule;
-}
-
 function loadWindowsWindowApi(): WindowsWindowApi {
   if (process.platform !== 'win32') throw new Error('Window bounds are available only on Windows.');
   if (apiCache) return apiCache;
-  const koffi = loadKoffi();
+  const koffi = loadKoffi('Window enumeration');
   const user32 = koffi.load('user32.dll');
   const kernel32 = koffi.load('kernel32.dll');
   const dwmapi = koffi.load('dwmapi.dll');

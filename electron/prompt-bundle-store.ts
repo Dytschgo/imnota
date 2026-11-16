@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { validatePng, type PngValidationFailure } from '../src/shared/png.js';
 import { portableFilename } from '../src/shared/utils.js';
 import { assertNoLinks, atomicWrite, isWithin } from './files.js';
 import { filesystemFailure, NativeWorkflowError } from './workflow-errors.js';
@@ -198,85 +199,49 @@ function bundleSuffix(bundleNumber: number): string {
   return String(bundleNumber).padStart(2, '0');
 }
 
-const CRC_TABLE = Uint32Array.from({ length: 256 }, (_, value) => {
-  let crc = value;
-  for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
-  return crc >>> 0;
-});
-
-function crc32(bytes: Uint8Array): number {
-  let crc = 0xffffffff;
-  for (const byte of bytes) crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function chunkType(png: Uint8Array, offset: number): string {
-  return String.fromCharCode(png[offset], png[offset + 1], png[offset + 2], png[offset + 3]);
+function promptBundlePngMessage(failure: PngValidationFailure): string {
+  switch (failure.reason) {
+    case 'size':
+      return 'Prompt PNG is empty, damaged, or too large to store.';
+    case 'signature':
+      return 'Prompt PNG has an invalid header.';
+    case 'header':
+      return 'Prompt PNG is missing its required header.';
+    case 'dimensions':
+      return 'Prompt PNG dimensions exceed safe full-resolution storage limits.';
+    case 'dimension-mismatch':
+      return 'Prompt PNG dimensions do not match the reserved bundle manifest.';
+    case 'truncated':
+      return 'Prompt PNG is truncated.';
+    case 'truncated-chunk':
+      return 'Prompt PNG contains a truncated chunk.';
+    case 'crc':
+      return 'Prompt PNG failed its integrity check.';
+    case 'repeated-header':
+      return 'Prompt PNG contains duplicate headers.';
+    case 'end-not-empty':
+    case 'end-before-data':
+      return 'Prompt PNG has an invalid ending.';
+    default:
+      return 'Prompt PNG is incomplete or has trailing data.';
+  }
 }
 
 export function validatePromptBundlePng(
   png: Uint8Array,
   expected: Pick<PromptBundleManifestItem, 'width' | 'height'>,
 ): void {
-  if (!(png instanceof Uint8Array) || png.length < 57 || png.length > MAX_PROMPT_BUNDLE_PNG_BYTES)
+  if (!(png instanceof Uint8Array))
     throw new NativeWorkflowError('invalid-input', 'Prompt PNG is empty, damaged, or too large to store.');
-  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
-  if (signature.some((byte, index) => png[index] !== byte))
-    throw new NativeWorkflowError('invalid-input', 'Prompt PNG has an invalid header.');
-  const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
-  let offset = 8;
-  let chunkIndex = 0;
-  let width = 0;
-  let height = 0;
-  let sawData = false;
-  let sawEnd = false;
-  while (offset < png.length) {
-    if (offset + 12 > png.length) throw new NativeWorkflowError('invalid-input', 'Prompt PNG is truncated.');
-    const length = view.getUint32(offset);
-    if (length > png.length - offset - 12)
-      throw new NativeWorkflowError('invalid-input', 'Prompt PNG contains a truncated chunk.');
-    const typeOffset = offset + 4;
-    const type = chunkType(png, typeOffset);
-    const dataOffset = typeOffset + 4;
-    const crcOffset = dataOffset + length;
-    if (view.getUint32(crcOffset) !== crc32(png.subarray(typeOffset, crcOffset)))
-      throw new NativeWorkflowError('invalid-input', 'Prompt PNG failed its integrity check.');
-    if (chunkIndex === 0 && (type !== 'IHDR' || length !== 13))
-      throw new NativeWorkflowError('invalid-input', 'Prompt PNG is missing its required header.');
-    if (type === 'IHDR') {
-      if (chunkIndex !== 0 || width || height)
-        throw new NativeWorkflowError('invalid-input', 'Prompt PNG contains duplicate headers.');
-      width = view.getUint32(dataOffset);
-      height = view.getUint32(dataOffset + 4);
-      if (
-        width < 1 ||
-        height < 1 ||
-        width > MAX_PROMPT_BUNDLE_PNG_EDGE ||
-        height > MAX_PROMPT_BUNDLE_PNG_EDGE ||
-        width * height > MAX_PROMPT_BUNDLE_PNG_PIXELS
-      )
-        throw new NativeWorkflowError(
-          'invalid-input',
-          'Prompt PNG dimensions exceed safe full-resolution storage limits.',
-        );
-      if (width !== expected.width || height !== expected.height)
-        throw new NativeWorkflowError(
-          'invalid-input',
-          'Prompt PNG dimensions do not match the reserved bundle manifest.',
-        );
-    } else if (type === 'IDAT') sawData = true;
-    else if (type === 'IEND') {
-      if (length !== 0 || !sawData)
-        throw new NativeWorkflowError('invalid-input', 'Prompt PNG has an invalid ending.');
-      sawEnd = true;
-      offset = crcOffset + 4;
-      break;
-    }
-    offset = crcOffset + 4;
-    chunkIndex++;
-  }
-  if (!sawEnd || offset !== png.length)
-    throw new NativeWorkflowError('invalid-input', 'Prompt PNG is incomplete or has trailing data.');
+  const result = validatePng(png, {
+    minBytes: 57,
+    maxBytes: MAX_PROMPT_BUNDLE_PNG_BYTES,
+    maxEdge: MAX_PROMPT_BUNDLE_PNG_EDGE,
+    maxPixels: MAX_PROMPT_BUNDLE_PNG_PIXELS,
+    expected: { width: expected.width, height: expected.height },
+    rejectRepeatedHeader: true,
+  });
+  if (!result.ok) throw new NativeWorkflowError('invalid-input', promptBundlePngMessage(result));
 }
 
 function validateManifest(items: readonly PromptBundleManifestItem[]): Map<number, PromptBundleManifestItem> {
