@@ -3,6 +3,7 @@ import Konva from 'konva';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Annotation } from '../../shared/types';
+import { dispatchCanvasCommand } from '../canvas/commands';
 import { zoomAt } from '../viewport';
 import { AnnotationCanvas } from './AnnotationCanvas';
 import type { ToolChoice } from './Toolbar';
@@ -47,6 +48,7 @@ function mountCanvas(
   revealAnnotationId?: string,
 ) {
   const image = document.createElement('img');
+  Object.defineProperties(image, { naturalWidth: { value: 900 }, naturalHeight: { value: 600 } });
   vi.spyOn(window, 'Image').mockImplementation(function () {
     return image;
   });
@@ -78,7 +80,7 @@ function mountCanvas(
       />
     );
   }
-  render(<Harness />);
+  const { unmount } = render(<Harness />);
   fireEvent.load(image);
   const stage = stageRef.current!;
   const captured = new Set<number>();
@@ -111,7 +113,17 @@ function mountCanvas(
     act(() => stage.content.dispatchEvent(event));
     return event;
   }
-  return { stage, canvas, pointer, touch, captured, saved: () => saved, selected: () => selection };
+  return {
+    stage,
+    canvas,
+    image,
+    unmount,
+    pointer,
+    touch,
+    captured,
+    saved: () => saved,
+    selected: () => selection,
+  };
 }
 
 test('a search target that appears on a later frame is revealed in the viewport', () => {
@@ -506,4 +518,294 @@ test('later double clicks still create text and reopen an existing editor for En
     expect(f.saved()).toHaveLength(1);
     expect(f.saved()[0].text).toBe(key === 'Escape' ? 'Original text' : 'Edited text');
   }
+});
+
+/** Queues animation frames so a test decides when each one runs. */
+function controlFrames() {
+  let next = 1;
+  const pending = new Map<number, FrameRequestCallback>();
+  vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+    pending.set(next, callback);
+    return next++;
+  });
+  const cancel = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id) => {
+    pending.delete(id);
+  });
+  return {
+    pending: () => [...pending.keys()],
+    cancel,
+    run() {
+      const callbacks = [...pending.values()];
+      pending.clear();
+      act(() => callbacks.forEach((callback) => callback(performance.now())));
+    },
+  };
+}
+
+function viewportOf(canvas: HTMLElement) {
+  return { x: Number(canvas.dataset.imageX), y: Number(canvas.dataset.imageY) };
+}
+
+function draftNode(stage: Konva.Stage, type: string) {
+  return stage.find(type).find((node) => node.id().startsWith('ann_'));
+}
+
+test('pen moves within one frame render once and pointerup keeps every point', () => {
+  const f = mountCanvas('pen');
+  const frames = controlFrames();
+  const scale = Number(f.canvas.dataset.imageScale);
+  f.pointer('pointerdown', 200, 200);
+  const moves = [
+    [210, 205],
+    [220, 215],
+    [235, 220],
+    [250, 240],
+  ];
+  for (const [x, y] of moves) f.pointer('pointermove', x, y);
+  expect(frames.pending()).toHaveLength(1);
+  // The initial draft stays on screen until the frame renders.
+  expect((draftNode(f.stage, 'Line') as Konva.Line).points()).toEqual([0, 0, 2, 2]);
+  frames.run();
+  expect((draftNode(f.stage, 'Line') as Konva.Line).points()).toHaveLength(2 + moves.length * 2);
+  // pointerup commits a last move that is still waiting for its frame.
+  f.pointer('pointermove', 270, 250);
+  f.pointer('pointerup', 270, 250);
+  expect(frames.pending()).toEqual([]);
+  const points = f.saved()[0].points!;
+  expect(points).toHaveLength(2 + (moves.length + 1) * 2);
+  expect(points.at(-2)).toBeCloseTo(70 / scale);
+  expect(points.at(-1)).toBeCloseTo(50 / scale);
+  // The committed stroke does not alias the buffer that the next stroke appends to.
+  const committed = [...points];
+  f.pointer('pointerdown', 300, 300);
+  f.pointer('pointermove', 320, 320);
+  frames.run();
+  expect(f.saved()[0].points).toEqual(committed);
+});
+
+test('pointer pan commits once per frame and pointerup applies the last movement', () => {
+  const f = mountCanvas('select');
+  const frames = controlFrames();
+  const start = viewportOf(f.canvas);
+  f.pointer('pointerdown', 600, 400);
+  for (let move = 1; move <= 60; move++) f.pointer('pointermove', 600 + move, 400 + move / 2);
+  expect(frames.pending()).toHaveLength(1);
+  expect(viewportOf(f.canvas)).toEqual(start);
+  frames.run();
+  expect(viewportOf(f.canvas)).toEqual({ x: start.x + 60, y: start.y + 30 });
+  f.pointer('pointermove', 700, 450);
+  f.pointer('pointerup', 700, 450);
+  expect(frames.pending()).toEqual([]);
+  expect(viewportOf(f.canvas)).toEqual({ x: start.x + 100, y: start.y + 50 });
+});
+
+test.each([
+  ['draft', 'rectangle'],
+  ['pan', 'select'],
+] as const)('unmounting mid-gesture cancels the pending %s frame', (_, tool) => {
+  const f = mountCanvas(tool);
+  const frames = controlFrames();
+  f.pointer('pointerdown', 600, 400);
+  f.pointer('pointermove', 640, 420);
+  const [frame] = frames.pending();
+  expect(frame).toBeDefined();
+  f.unmount();
+  expect(frames.cancel).toHaveBeenCalledWith(frame);
+});
+
+test('the screenshot, saved marks and the draft with transformers draw on separate layers', () => {
+  const f = mountCanvas('rectangle', [existingRectangle]);
+  const layers = f.stage.getLayers();
+  expect(layers).toHaveLength(3);
+  const [screenshot, saved, draft] = layers;
+  expect(screenshot.listening()).toBe(false);
+  expect(screenshot.find('Image').map((node) => (node as Konva.Image).image())).toEqual([f.image]);
+  // Native smoke checks sample the first stage canvas for screenshot pixels.
+  expect(f.stage.content.querySelector('canvas')).toBe(screenshot.getNativeCanvasElement());
+  expect(f.stage.findOne(`#${existingRectangle.id}`)?.getLayer()).toBe(saved);
+  expect(draft.find('Transformer')).toHaveLength(1);
+  const frames = controlFrames();
+  f.pointer('pointerdown', 600, 450);
+  f.pointer('pointermove', 660, 500);
+  frames.run();
+  expect(draftNode(f.stage, 'Rect')?.getLayer()).toBe(draft);
+  // A draft frame invalidates only its own layer, never the full-resolution screenshot.
+  const redraws = vi.spyOn(Konva.Layer.prototype, 'batchDraw');
+  f.pointer('pointermove', 700, 520);
+  frames.run();
+  expect(redraws.mock.contexts.length).toBeGreaterThan(0);
+  expect(new Set(redraws.mock.contexts)).toEqual(new Set([draft]));
+});
+
+const pixelations: Annotation[] = [0, 1, 2].map((index) => ({
+  id: `pixels-${index}`,
+  kind: 'pixelate',
+  x: 50 + index * 250,
+  y: 400,
+  width: 200,
+  height: 150,
+  blurIntensity: 14,
+  zIndex: index,
+}));
+
+function pixelRegions(stage: Konva.Stage, annotations: Annotation[]) {
+  return annotations.map(
+    (annotation) => (stage.findOne(`#${annotation.id}`) as Konva.Image).image() as HTMLCanvasElement,
+  );
+}
+
+function expectSameRegions(actual: HTMLCanvasElement[], expected: HTMLCanvasElement[]) {
+  expect(actual).toHaveLength(expected.length);
+  actual.forEach((canvas, index) => expect(canvas).toBe(expected[index]));
+}
+
+function drawGesture(f: ReturnType<typeof mountCanvas>, frames: ReturnType<typeof controlFrames>) {
+  f.pointer('pointerdown', 300, 100);
+  for (let move = 1; move <= 12; move++) {
+    f.pointer('pointermove', 300 + move * 5, 100 + move * 3);
+    if (move % 3 === 0) frames.run();
+  }
+  f.pointer('pointerup', 360, 136);
+}
+
+test('drawing a rectangle over pixelations rebuilds no pixelation region', () => {
+  const f = mountCanvas('rectangle', pixelations);
+  const before = pixelRegions(f.stage, pixelations);
+  expect(before.map((canvas) => [canvas.width, canvas.height])).toEqual([
+    [200, 150],
+    [200, 150],
+    [200, 150],
+  ]);
+  const frames = controlFrames();
+  const created = vi.spyOn(document, 'createElement');
+  drawGesture(f, frames);
+  expect(f.saved()).toHaveLength(4);
+  expect(created.mock.calls.filter(([tag]) => String(tag) === 'canvas')).toEqual([]);
+  expectSameRegions(pixelRegions(f.stage, pixelations), before);
+});
+
+test('a pixelate draft rebuilds only its own region per frame and releases the regions it replaces', () => {
+  const f = mountCanvas('pixelate', pixelations);
+  const before = pixelRegions(f.stage, pixelations);
+  const frames = controlFrames();
+  const created = vi.spyOn(document, 'createElement');
+  const canvases = () =>
+    created.mock.results
+      .map((result) => result.value as HTMLElement)
+      .filter((element): element is HTMLCanvasElement => element instanceof HTMLCanvasElement);
+  drawGesture(f, frames);
+  // The initial draft and four rendered frames each build one sample and one output canvas.
+  // Committing reuses the last region.
+  expect(canvases()).toHaveLength(5 * 2);
+  const committed = f.saved()[3];
+  expect(committed.kind).toBe('pixelate');
+  const region = pixelRegions(f.stage, [committed])[0];
+  expect(region.width * region.height).toBeGreaterThan(0);
+  // Every superseded draft region is released; the existing regions were never rebuilt.
+  const live = canvases().filter((canvas) => canvas.width || canvas.height);
+  expect(live).toHaveLength(1);
+  expect(live[0]).toBe(region);
+  expectSameRegions(pixelRegions(f.stage, pixelations), before);
+  expect(before.every((canvas) => canvas.width === 200 && canvas.height === 150)).toBe(true);
+});
+
+function transformedNodes(stage: Konva.Stage) {
+  return stage.find('Transformer').flatMap((node) => (node as Konva.Transformer).nodes());
+}
+
+test('the select tool attaches no transformer while nothing is selected', () => {
+  // The onboarding Annotate step mounts this same canvas with the select tool and no selection.
+  const f = mountCanvas('select', [existingRectangle]);
+  expect(f.stage.find('Transformer')).toHaveLength(1);
+  expect(transformedNodes(f.stage)).toEqual([]);
+  vi.spyOn(f.stage, 'getIntersection').mockReturnValue(
+    f.stage.findOne(`#${existingRectangle.id}`) as Konva.Shape,
+  );
+  f.pointer('pointerdown', 240, 240);
+  f.pointer('pointerup', 240, 240);
+  expect(f.selected()).toBe(existingRectangle.id);
+  expect(transformedNodes(f.stage).map((node) => node.id())).toEqual([existingRectangle.id]);
+  act(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  });
+  expect(f.selected()).toBeNull();
+  expect(transformedNodes(f.stage)).toEqual([]);
+});
+
+function viewportState(canvas: HTMLElement) {
+  return { ...viewportOf(canvas), scale: Number(canvas.dataset.imageScale) };
+}
+
+test('actual size during a pending pan frame keeps 100% and later movement pans from it', () => {
+  const f = mountCanvas('select');
+  const frames = controlFrames();
+  expect(viewportState(f.canvas).scale).not.toBe(1);
+  f.pointer('pointerdown', 600, 400);
+  f.pointer('pointermove', 620, 410);
+  act(() => dispatchCanvasCommand(f.stage, 'actual-size'));
+  const actual = viewportState(f.canvas);
+  expect(actual.scale).toBe(1);
+  frames.run();
+  expect(viewportState(f.canvas)).toEqual(actual);
+  f.pointer('pointermove', 650, 430);
+  frames.run();
+  expect(viewportState(f.canvas)).toEqual({ x: actual.x + 30, y: actual.y + 20, scale: 1 });
+  f.pointer('pointerup', 650, 430);
+  expect(frames.pending()).toEqual([]);
+});
+
+test('zooming in during a pending pan frame zooms the panned view', () => {
+  const f = mountCanvas('select');
+  const frames = controlFrames();
+  const start = viewportState(f.canvas);
+  f.pointer('pointerdown', 600, 400);
+  f.pointer('pointermove', 620, 410);
+  act(() => dispatchCanvasCommand(f.stage, 'zoom-in'));
+  frames.run();
+  const expected = zoomAt({ ...start, x: start.x + 20, y: start.y + 10 }, { x: 450, y: 300 }, 1.1);
+  const actual = viewportState(f.canvas);
+  expect(actual.scale).toBeCloseTo(expected.scale);
+  expect(actual.x).toBeCloseTo(expected.x);
+  expect(actual.y).toBeCloseTo(expected.y);
+});
+
+test('a ctrl-wheel zoom queued before a pan move in the same frame is kept', () => {
+  const f = mountCanvas('select');
+  const frames = controlFrames();
+  const start = viewportState(f.canvas);
+  f.pointer('pointerdown', 600, 400);
+  act(() => {
+    f.stage.content.dispatchEvent(
+      new WheelEvent('wheel', {
+        bubbles: true,
+        cancelable: true,
+        ctrlKey: true,
+        deltaY: -10,
+        clientX: 100,
+        clientY: 150,
+      }),
+    );
+  });
+  f.pointer('pointermove', 620, 410);
+  frames.run();
+  const zoomed = zoomAt(start, { x: 100, y: 150 }, Math.exp(0.1));
+  const actual = viewportState(f.canvas);
+  expect(actual.scale).toBeCloseTo(zoomed.scale);
+  expect(actual.x).toBeCloseTo(zoomed.x + 20);
+  expect(actual.y).toBeCloseTo(zoomed.y + 10);
+  f.pointer('pointerup', 620, 410);
+  expect(viewportState(f.canvas)).toEqual(actual);
+});
+
+test('a search reveal queued before a pan frame centres the match in the stage', () => {
+  const frames = controlFrames();
+  const f = mountCanvas('select', [{ ...existingRectangle, x: 1800 }], existingRectangle.id);
+  expect(frames.pending()).not.toEqual([]);
+  f.pointer('pointerdown', 600, 400);
+  f.pointer('pointermove', 900, 550);
+  frames.run();
+  f.pointer('pointerup', 900, 550);
+  const rect = (f.stage.findOne(`#${existingRectangle.id}`) as Konva.Shape).getClientRect();
+  expect(rect.x + rect.width / 2).toBeCloseTo(f.stage.width() / 2);
+  expect(rect.y + rect.height / 2).toBeCloseTo(f.stage.height() / 2);
 });
