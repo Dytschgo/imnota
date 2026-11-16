@@ -192,6 +192,7 @@ const canvasFreeByModule = new Map<string, Set<string>>([
       'next-history-light.png', // Backups & history settings.
       'next-history-detail-light.png', // Selected snapshot in settings.
       'next-search-light.png', // Project library search.
+      'next-library-light.png', // Project library rows and their actions.
       'next-templates-light.png', // New-project dialog over the library.
       'next-clipboard-light.png', // Sharing dialog over a Markdown template.
     ]),

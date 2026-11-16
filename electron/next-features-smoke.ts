@@ -192,6 +192,7 @@ export async function captureNextFeatureLightViews(
     filename:
       | 'next-history-light.png'
       | 'next-history-detail-light.png'
+      | 'next-library-light.png'
       | 'next-search-light.png'
       | 'next-templates-light.png'
       | 'next-clipboard-light.png',
@@ -221,6 +222,11 @@ export async function captureNextFeatureLightViews(
   await capture('next-history-detail-light.png');
   await driver.click({ selector: '[aria-label="Back to workspace"]' });
   await driver.click({ selector: '.nav-item', text: 'Projects', exact: true });
+  // Project rows with their edit, duplicate, archive and delete actions; a query would hide them.
+  const clearSearch = { selector: '.search-clear', text: 'Clear search', exact: true };
+  if (await driver.exists(clearSearch)) await driver.click(clearSearch);
+  await driver.waitFor({ selector: '.project-row-actions [data-testid^="project-duplicate-"]' });
+  await capture('next-library-light.png');
   await driver.fill({ selector: '[aria-label="Search projects"]' }, 'orbital lantern');
   await driver.waitFor({ selector: '.content-search-result', text: 'Feature verification' });
   await capture('next-search-light.png');
