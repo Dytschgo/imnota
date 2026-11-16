@@ -62,8 +62,56 @@ const macosTools = [
 // All extraction, plist/signature/architecture checks and filesystem operations
 // are native. After the final signature check, fake open replaces the fixture's
 // executable with /bin/sleep named Imnota and starts it from the installed path.
-// pgrep/ps and the readiness deadline are real; Electron/GUI health is simulated.
-const common = String.raw`
+// pgrep/ps are real; Electron/GUI health is simulated. Deadlines run on real
+// time except for the expected-timeout faults below.
+//
+// Faults whose expected outcome is a shipped SECONDS deadline expiring, with that
+// deadline in seconds: the 60-second quit deadline and the 30-second replacement
+// observation deadline. Only these run under the virtual clock; success, quit,
+// lock contention and every other case keep real time.
+const virtualClockFaults = new Map([
+  ['refuses-quit', 60],
+  ['blocked-quit', 60],
+  ['no-process', 30],
+  ['exits', 30],
+]);
+
+function virtualClock(fault) {
+  return virtualClockFaults.has(fault) ? '1' : '0';
+}
+
+// Bash 3.2 virtual clock. A whole-second /bin/sleep takes a tiny real interval
+// and advances SECONDS by the requested amount, so the shipped SECONDS-based
+// deadline loops expire in about a second while every process check inside them
+// (pgrep, ps, kill -0, the quit-sender watchdog) still runs for real. Fractional
+// harness polls keep sleeping in real time. The scripts call only /bin/sleep.
+const virtualClockShell = String.raw`
+if [[ "$FIXTURE_VIRTUAL_CLOCK" == 1 ]]; then
+/bin/sleep() {
+  local waited=0
+  if [[ "$#" != 1 ]]; then command /bin/sleep "$@"; return; fi
+  case "$1" in
+    ''|*[!0-9]*) command /bin/sleep "$1"; return ;;
+  esac
+  if [[ "$FAULT" == blocked-quit ]]; then
+    # The watchdog signals the quit sender only once ps shows it as osascript.
+    # Give the background sender real time to exec before the deadline passes,
+    # exactly as the real 60-second wait always did.
+    while (( waited < 100 )) &&
+      [[ "$(command /bin/ps -o comm= -p "$!" 2>/dev/null)" != /usr/bin/osascript ]]; do
+      command /bin/sleep 0.05
+      waited=$((waited + 1))
+    done
+  fi
+  command /bin/sleep 0.01
+  SECONDS=$((SECONDS + $1))
+}
+fi
+`;
+
+const common =
+  virtualClockShell +
+  String.raw`
 start_fixture_process() {
   local bundle=$1 duration=$2
   # Substitute only after the production installed-signature check has passed.
@@ -271,6 +319,68 @@ test('native fixture keeps quick-install tags stable and updater identity exact 
   }
 });
 
+test('native harness applies the virtual clock only to expected-timeout faults', () => {
+  const harness = common + installBody + updateBody;
+  const faults = new Set(['', ...[...harness.matchAll(/\$FAULT" == ([a-z-]+)/g)].map((match) => match[1])]);
+  for (const fault of virtualClockFaults.keys()) assert.ok(faults.has(fault), `Unknown fault: ${fault}`);
+  assert.deepEqual([...faults].filter((fault) => virtualClock(fault) === '1').sort(), [
+    'blocked-quit',
+    'exits',
+    'no-process',
+    'refuses-quit',
+  ]);
+  for (const fault of ['', 'quit', 'hold', 'running-failure', 'open', 'copy', 'verification'])
+    assert.equal(virtualClock(fault), '0', `Real time expected for fault "${fault}"`);
+  assert.match(harness, /FIXTURE_VIRTUAL_CLOCK" == 1 \]\]; then\n\/bin\/sleep\(\) \{/);
+  assert.match(environment.toString(), /FIXTURE_VIRTUAL_CLOCK: virtualClock\(fault\)/);
+  // The elapsed bound in run() assumes these shipped deadlines, and the clock
+  // shadows only /bin/sleep, so the scripts must not call a bare sleep.
+  for (const script of [installer, updater]) {
+    const source = fs.readFileSync(script, 'utf8');
+    assert.match(
+      source,
+      /wait_for_app_to_quit\(\) \{\r?\n {2}local timeout=60 deadline=\$\(\(SECONDS \+ 60\)\)/,
+    );
+    assert.match(
+      source,
+      /wait_for_replacement\(\) \{\r?\n {2}local bundle=\$1 timeout=30 deadline=\$\(\(SECONDS \+ 30\)\)/,
+    );
+    assert.doesNotMatch(source, /(?:^|[\s;&|(])sleep\s/m, script);
+  }
+});
+
+test('native harness virtual clock advances Bash SECONDS without waiting', () => {
+  const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : '/bin/bash';
+  const probe = (enabled, body) =>
+    spawnSync(bash, ['-c', `${virtualClockShell}\nset -Eeuo pipefail\n${body}`], {
+      env: { ...process.env, FAULT: 'exits', FIXTURE_VIRTUAL_CLOCK: enabled },
+      encoding: 'utf8',
+      timeout: 20000,
+    });
+  const disabled = probe('0', 'type -t /bin/sleep');
+  assert.equal(disabled.status, 0, disabled.stderr);
+  assert.equal(disabled.stdout.trim(), 'file');
+  const started = Date.now();
+  const enabled = probe(
+    '1',
+    [
+      'type -t /bin/sleep',
+      'start=$SECONDS',
+      '/bin/sleep 45',
+      'echo "$((SECONDS - start))"',
+      'start=$SECONDS',
+      '/bin/sleep 0.1',
+      'echo "$((SECONDS - start))"',
+    ].join('\n'),
+  );
+  assert.equal(enabled.status, 0, enabled.stderr);
+  const [kind, advanced, fractional] = enabled.stdout.trim().split('\n');
+  assert.equal(kind, 'function');
+  assert.ok(Number(advanced) >= 45 && Number(advanced) <= 47, enabled.stdout);
+  assert.ok(Number(fractional) <= 1, enabled.stdout);
+  assert.ok(Date.now() - started < 15000, 'The virtual clock must not wait in real time');
+});
+
 function environment(f, fault, kind) {
   const release = fixtureRelease(kind, version);
   return {
@@ -285,6 +395,7 @@ function environment(f, fault, kind) {
     FIXTURE_VERSION: version,
     FIXTURE_TAG: release.tag,
     FAULT: fault,
+    FIXTURE_VIRTUAL_CLOCK: virtualClock(fault),
   };
 }
 
@@ -329,15 +440,27 @@ function stopFixtureProcesses(root) {
 }
 
 function run(f, kind, fault = '') {
+  const started = Date.now();
+  let result;
+  let elapsed;
   try {
-    return spawnSync('/bin/bash', invocation(kind), {
+    result = spawnSync('/bin/bash', invocation(kind), {
       env: environment(f, fault, kind),
       encoding: 'utf8',
       timeout: 120000,
     });
+    elapsed = Date.now() - started;
   } finally {
     stopFixtureProcesses(f.root);
   }
+  // A leaked quit sender would also hold the output pipes open past this bound.
+  const deadline = virtualClockFaults.get(fault);
+  if (deadline)
+    assert.ok(
+      elapsed < deadline * 1000,
+      `${kind} ${fault}: took ${elapsed} ms; the virtual clock did not shorten the ${deadline}-second deadline\n${result.stderr}`,
+    );
+  return result;
 }
 
 function success(result) {
