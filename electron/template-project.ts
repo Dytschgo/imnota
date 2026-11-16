@@ -9,6 +9,7 @@ import { validateProject } from '../src/shared/schema.js';
 import { emptyProject, portableFilename, slugify } from '../src/shared/utils.js';
 import { assertNoLinks, atomicWrite } from './files.js';
 import { ensureCollection } from './collections.js';
+import { withinProjectCreationQueue } from './project-creation-queue.js';
 
 const COLLECTION_ID = '001-collection';
 
@@ -23,22 +24,6 @@ export interface TemplateProjectDependencies {
   now?: () => string;
   randomId?: () => string;
   write?: (target: string, value: string) => Promise<void>;
-}
-
-let projectCreationQueue: Promise<void> = Promise.resolve();
-
-async function withinProjectCreationQueue<T>(operation: () => Promise<T>): Promise<T> {
-  const previous = projectCreationQueue;
-  let release!: () => void;
-  projectCreationQueue = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await previous;
-  try {
-    return await operation();
-  } finally {
-    release();
-  }
 }
 
 async function pathExistsOrIsLinked(target: string): Promise<boolean> {
