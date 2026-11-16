@@ -1,5 +1,16 @@
 import { Camera, Copy, ImagePlus, PanelRight, Upload } from 'lucide-react';
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  lazy,
+  memo,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import type { CaptureDelaySeconds } from '../../shared/capture';
 import { orderedCollectionItems, type ContentItemContent } from '../../shared/content-items';
 import type { RecentlyDeletedItem, RecentlyDeletedRestoreResult } from '../../shared/recently-deleted';
@@ -21,7 +32,11 @@ import { Toolbar, type ToolChoice } from '../components/Toolbar';
 import { Button, EmptyState, IconButton } from '../components/ui';
 import { ScreenshotInspector } from '../inspector/ScreenshotInspector';
 import { useAppStore } from '../store';
+import { useStableCallback } from '../useStableCallback';
 import { TextBlockEditor } from '../content/TextBlockEditor';
+
+// Memoized here so description edits skip the canvas; its props below are kept stable.
+const MemoizedAnnotationCanvas = memo(AnnotationCanvas);
 
 const DrawingEditor = lazy(() =>
   import('../content/DrawingEditor').then((module) => ({ default: module.DrawingEditor })),
@@ -91,12 +106,22 @@ export interface WorkspaceProps {
 }
 
 export function Workspace(props: WorkspaceProps) {
-  const store = useAppStore();
+  const store = useAppStore(
+    useShallow((state) => ({
+      snapshot: state.snapshot,
+      activeScreenshotId: state.activeScreenshotId,
+      activeCollectionId: state.activeCollectionId,
+      leftPanelOpen: state.leftPanelOpen,
+      rightPanelOpen: state.rightPanelOpen,
+      set: state.set,
+    })),
+  );
   const inspectorTriggerRef = useRef<HTMLButtonElement | null>(null);
   const inspectorDrawerRef = useRef<HTMLDivElement>(null);
   const inspectorReturnFocus = useRef<HTMLElement | null>(null);
   const [narrowViewport, setNarrowViewport] = useState(() => window.matchMedia('(max-width: 950px)').matches);
-  const shot = store.activeScreenshot();
+  const shot =
+    store.snapshot?.project.screenshots.find((entry) => entry.id === store.activeScreenshotId) ?? null;
   const item = store.snapshot?.project.contentItems?.find((entry) => entry.id === store.activeScreenshotId);
   const drawingTitle = item?.kind === 'drawing' ? item.title || 'Untitled drawing' : 'Drawing';
   // The rail numbers every item in sequence; the inspector names the same number.
@@ -178,16 +203,42 @@ export function Workspace(props: WorkspaceProps) {
     if (previousInspectorOpen.current && !store.rightPanelOpen) restoreInspectorFocus();
     previousInspectorOpen.current = store.rightPanelOpen;
   }, [store.rightPanelOpen, restoreInspectorFocus]);
-  const inspectorCollapse = (
-    <IconButton
-      data-drawer-autofocus
-      data-testid="inspector-toggle"
-      label={narrowViewport ? 'Close inspector' : 'Collapse inspector'}
-      onClick={dismissInspector}
-    >
-      <PanelRight size={17} aria-hidden="true" />
-    </IconButton>
+  const inspectorCollapse = useMemo(
+    () => (
+      <IconButton
+        data-drawer-autofocus
+        data-testid="inspector-toggle"
+        label={narrowViewport ? 'Close inspector' : 'Collapse inspector'}
+        onClick={dismissInspector}
+      >
+        <PanelRight size={17} aria-hidden="true" />
+      </IconButton>
+    ),
+    [dismissInspector, narrowViewport],
   );
+  // The canvas and inspector are memoized; App recreates these handlers on every render.
+  const changeAnnotations = useStableCallback(props.onChangeAnnotations);
+  const selectAnnotation = useStableCallback(props.onSelectAnnotation);
+  const showMessage = useStableCallback(props.onMessage);
+  const chooseTool = useStableCallback(props.onTool);
+  const retryImageLoad = useStableCallback(props.onRetryImageLoad);
+  const updateShot = useStableCallback(props.onUpdateShot);
+  const changeDescription = useStableCallback(props.onDescriptionChange);
+  const undoDescription = useStableCallback(props.onUndoDescription);
+  const duplicateShot = useStableCallback(props.onDuplicate);
+  const changeSelectedAnnotation = useStableCallback((patch: Partial<Annotation>) => {
+    if (!props.selectedAnnotationId) return;
+    props.onChangeAnnotations(
+      props.annotations.map((item) =>
+        item.id === props.selectedAnnotationId ? { ...item, ...patch } : item,
+      ),
+    );
+  });
+  const deleteSelectedAnnotation = useStableCallback(() => {
+    if (!props.selectedAnnotationId) return;
+    props.onChangeAnnotations(props.annotations.filter((item) => item.id !== props.selectedAnnotationId));
+    props.onSelectAnnotation(null);
+  });
   const drawingPlaceholder = (message: string) => (
     <div className="drawing-editor">
       <div className="drawing-editor-tools">
@@ -318,20 +369,20 @@ export function Workspace(props: WorkspaceProps) {
         ) : shot ? (
           <ErrorBoundary variant="panel" resetKey={shot.id}>
             <NativeFaultProbe scope="panel" />
-            <AnnotationCanvas
+            <MemoizedAnnotationCanvas
               key={`${store.snapshot?.projectPath}:${shot.id}`}
               image={props.image}
               loadFailed={props.imageLoadFailed}
-              onRetryLoad={props.onRetryImageLoad}
+              onRetryLoad={retryImageLoad}
               annotations={props.annotations}
               selectedId={props.selectedAnnotationId}
               revealAnnotationId={props.revealAnnotationId}
               tool={props.tool}
-              onChange={props.onChangeAnnotations}
-              onSelect={props.onSelectAnnotation}
-              onMessage={props.onMessage}
+              onChange={changeAnnotations}
+              onSelect={selectAnnotation}
+              onMessage={showMessage}
               stageRef={props.stageRef}
-              onTool={props.onTool}
+              onTool={chooseTool}
               theme={props.resolvedTheme}
               annotationColor={props.annotationColor}
             />
@@ -469,26 +520,13 @@ export function Workspace(props: WorkspaceProps) {
                 headerAction={inspectorCollapse}
                 shot={shot}
                 selectedAnnotation={selectedAnnotation}
-                onUpdateShot={props.onUpdateShot}
-                onDescriptionChange={props.onDescriptionChange}
-                onUndoDescription={props.onUndoDescription}
+                onUpdateShot={updateShot}
+                onDescriptionChange={changeDescription}
+                onUndoDescription={undoDescription}
                 canUndoDescription={props.canUndoDescription}
-                onChangeAnnotation={(patch) => {
-                  if (!props.selectedAnnotationId) return;
-                  props.onChangeAnnotations(
-                    props.annotations.map((item) =>
-                      item.id === props.selectedAnnotationId ? { ...item, ...patch } : item,
-                    ),
-                  );
-                }}
-                onDeleteAnnotation={() => {
-                  if (!props.selectedAnnotationId) return;
-                  props.onChangeAnnotations(
-                    props.annotations.filter((item) => item.id !== props.selectedAnnotationId),
-                  );
-                  props.onSelectAnnotation(null);
-                }}
-                onDuplicate={props.onDuplicate}
+                onChangeAnnotation={changeSelectedAnnotation}
+                onDeleteAnnotation={deleteSelectedAnnotation}
+                onDuplicate={duplicateShot}
                 duplicateShortcut={props.shortcutLabels.duplicate}
                 sourceContextEnabled={props.sourceContextEnabled}
               />

@@ -4,18 +4,15 @@ import {
   Camera,
   ChevronDown,
   Clipboard,
-  Eye,
-  EyeOff,
-  FileImage,
   FileText,
   PanelLeft,
-  Trash2,
   Pencil,
   Plus,
   Timer,
   Upload,
 } from 'lucide-react';
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { CAPTURE_DELAY_SECONDS, type CaptureDelaySeconds } from '../../shared/capture';
 import type { ProjectData, ProjectSnapshot } from '../../shared/types';
 import type { RecentlyDeletedItem, RecentlyDeletedRestoreResult } from '../../shared/recently-deleted';
@@ -23,18 +20,13 @@ import { collectionDisplayName } from './collection-display-name';
 import { RecentlyDeleted } from './RecentlyDeleted';
 import { orderedCollectionItems, type OrderedCollectionItem } from '../../shared/content-items';
 import { ScreenshotComparison } from './ScreenshotComparison';
-import { detectShortcutPlatform, formatShortcut, shortcutMatchesEvent } from '../../shared/shortcuts';
+import { detectShortcutPlatform, formatShortcut } from '../../shared/shortcuts';
 import { nowIso } from '../../shared/utils';
 import { Button, IconButton, Modal, TextArea, TextInput } from '../components/ui';
 import { useAppStore } from '../store';
+import { useStableCallback } from '../useStableCallback';
 import { reasonMessage } from '../user-facing-error';
-import { textBlockLabel } from './text-block-label';
-
-/** One name for a rail item's visible label, tooltip and action names. */
-function railItemLabel(item: OrderedCollectionItem): string {
-  if (item.kind === 'text') return textBlockLabel(item.preview);
-  return item.title || (item.kind === 'screenshot' ? item.originalFilename : 'Drawing');
-}
+import { CollectionRailRow } from './CollectionRailRow';
 
 export interface CollectionRailProps {
   onFlush(): Promise<boolean>;
@@ -79,7 +71,16 @@ export function CollectionControls({
   onSaveProject?(project: ProjectData): Promise<boolean>;
   onUpdateProject?(project: ProjectData): void;
 }) {
-  const store = useAppStore();
+  const store = useAppStore(
+    useShallow((state) => ({
+      snapshot: state.snapshot,
+      activeCollectionId: state.activeCollectionId,
+      activeScreenshotId: state.activeScreenshotId,
+      setActiveCollection: state.setActiveCollection,
+      setProject: state.setProject,
+      updateProject: state.updateProject,
+    })),
+  );
   const project = store.snapshot?.project;
   const current = project?.collections.find((collection) => collection.id === store.activeCollectionId);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -457,7 +458,16 @@ export function CollectionRail({
   deleteShortcut,
   reorderBindings = DEFAULT_REORDER_BINDINGS,
 }: CollectionRailProps) {
-  const store = useAppStore();
+  const store = useAppStore(
+    useShallow((state) => ({
+      snapshot: state.snapshot,
+      activeCollectionId: state.activeCollectionId,
+      activeScreenshotId: state.activeScreenshotId,
+      leftPanelOpen: state.leftPanelOpen,
+      set: state.set,
+      updateProject: state.updateProject,
+    })),
+  );
   const shortcutPlatform = detectShortcutPlatform();
   const reorderKeys = [reorderBindings.up, reorderBindings.down]
     .filter(Boolean)
@@ -474,7 +484,10 @@ export function CollectionRail({
   const addMenuItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const addMenuId = useId().replace(/:/g, '');
   const project = store.snapshot?.project;
-  const shots = project ? orderedCollectionItems(project, store.activeCollectionId) : [];
+  const shots = useMemo(
+    () => (project ? orderedCollectionItems(project, store.activeCollectionId) : []),
+    [project, store.activeCollectionId],
+  );
   const captureIsPrimary = capturePrimary && captureEnabled && Boolean(onCapture);
   const addItemOptions: Array<{
     id: string;
@@ -627,6 +640,17 @@ export function CollectionRail({
       onMessage('The include/exclude change remains open but has not been saved.');
   }
 
+  // Rows are memoized, so give them handlers whose identity survives every project edit.
+  const selectRow = useStableCallback((id: string) => void onSelectScreenshot(id));
+  const toggleRowVisibility = useStableCallback((item: OrderedCollectionItem) => void toggleVisibility(item));
+  // An omitted source index falls back to the dragged row.
+  const reorderRow = useStableCallback(
+    (targetIndex: number, sourceIndex?: number) => void reorderScreenshot(targetIndex, sourceIndex),
+  );
+  const deleteRow = useStableCallback(
+    onDeleteItem && ((id: string, kind: OrderedCollectionItem['kind']) => void onDeleteItem(id, kind)),
+  );
+
   return (
     <aside
       className={`shot-rail ${store.leftPanelOpen ? '' : 'collapsed'}`}
@@ -657,108 +681,24 @@ export function CollectionRail({
           />
           <div className="shot-list" aria-label="Content sequence">
             {shots.map((item, index) => (
-              <div
+              <CollectionRailRow
                 key={item.id}
-                draggable
-                className={`shot-item ${item.id === store.activeScreenshotId ? 'active' : ''} ${item.includeInExport ? '' : 'excluded'}`}
-                onDragStart={() => setDragIndex(index)}
-                onDragEnd={() => setDragIndex(null)}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  void reorderScreenshot(index);
-                }}
-              >
-                <button
-                  className="shot-select"
-                  onClick={() => void onSelectScreenshot(item.id)}
-                  data-testid={`screenshot-${item.id}`}
-                  onKeyDown={(event) => {
-                    const matches = (binding: string | null) =>
-                      shortcutMatchesEvent(event.nativeEvent, binding, shortcutPlatform);
-                    const step = matches(reorderBindings.up) ? -1 : matches(reorderBindings.down) ? 1 : 0;
-                    if (!step) return;
-                    // Handled here so the same keys keep their global meaning everywhere else.
-                    event.preventDefault();
-                    const next = index + step;
-                    if (next >= 0 && next < shots.length) void reorderScreenshot(next, index);
-                  }}
-                  title={[railItemLabel(item), reorderHint].filter(Boolean).join('\n')}
-                >
-                  <span className="shot-index">{String(index + 1).padStart(2, '0')}</span>
-                  <div className="thumb">
-                    {store.snapshot?.thumbnails[item.id] ? (
-                      <img src={store.snapshot.thumbnails[item.id]} alt="" />
-                    ) : item.kind === 'text' ? (
-                      <FileText size={18} aria-hidden="true" />
-                    ) : item.kind === 'drawing' ? (
-                      <Pencil size={18} aria-hidden="true" />
-                    ) : (
-                      <FileImage size={18} aria-hidden="true" />
-                    )}
-                  </div>
-                  <span className="shot-copy">
-                    <strong>{railItemLabel(item)}</strong>
-                    <small>
-                      {'conflict' in item && item.conflict
-                        ? item.includeInExport
-                          ? 'Copy conflict · included manually · '
-                          : 'Copy conflict · excluded · '
-                        : ''}
-                      {item.kind === 'screenshot'
-                        ? `${item.priority} priority`
-                        : item.kind === 'drawing'
-                          ? 'Drawing'
-                          : 'Markdown'}
-                    </small>
-                  </span>
-                </button>
-                <div className="shot-item-actions">
-                  <IconButton
-                    data-testid={`screenshot-export-toggle-${item.id}`}
-                    className="shot-visibility"
-                    label={
-                      item.includeInExport
-                        ? `Exclude ${railItemLabel(item)} from prompt`
-                        : `Include ${railItemLabel(item)} in prompt`
-                    }
-                    aria-pressed={item.includeInExport}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void toggleVisibility(item);
-                    }}
-                  >
-                    {item.includeInExport ? (
-                      <Eye size={16} aria-hidden="true" />
-                    ) : (
-                      <EyeOff size={16} aria-hidden="true" />
-                    )}
-                  </IconButton>
-                  {onDeleteItem && (
-                    <IconButton
-                      className="shot-delete"
-                      data-testid={`item-delete-${item.id}`}
-                      label={`Delete ${item.kind === 'text' ? 'text block' : item.kind}: ${railItemLabel(item)}`}
-                      {...(deleteShortcut && item.id === store.activeScreenshotId
-                        ? { title: `Delete (${deleteShortcut})` }
-                        : {})}
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onDragStart={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                      }}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void onDeleteItem(item.id, item.kind);
-                      }}
-                    >
-                      <Trash2 size={15} aria-hidden="true" />
-                    </IconButton>
-                  )}
-                </div>
-              </div>
+                item={item}
+                index={index}
+                itemCount={shots.length}
+                active={item.id === store.activeScreenshotId}
+                thumbnail={store.snapshot?.thumbnails[item.id]}
+                reorderHint={reorderHint}
+                reorderUp={reorderBindings.up}
+                reorderDown={reorderBindings.down}
+                shortcutPlatform={shortcutPlatform}
+                deleteShortcut={item.id === store.activeScreenshotId ? deleteShortcut : undefined}
+                onSelect={selectRow}
+                onToggleVisibility={toggleRowVisibility}
+                onDelete={deleteRow}
+                onReorder={reorderRow}
+                onDragIndex={setDragIndex}
+              />
             ))}
           </div>
           <div className="rail-actions">
