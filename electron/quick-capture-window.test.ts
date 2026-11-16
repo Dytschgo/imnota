@@ -102,6 +102,7 @@ afterEach(async () => {
 function png(width = 720, height = 480) {
   const bytes = Buffer.alloc(33);
   bytes.set([137, 80, 78, 71, 13, 10, 26, 10]);
+  bytes.writeUInt32BE(13, 8); // IHDR data is always 13 bytes.
   bytes.write('IHDR', 12);
   bytes.writeUInt32BE(width, 16);
   bytes.writeUInt32BE(height, 20);
@@ -265,4 +266,15 @@ it('carries an explicit Annotate request until the compact editor acknowledges i
     value: { editorCaptureId: undefined },
   });
   expect(manager.store.size).toBe(2);
+});
+
+it('rejects a capture without a PNG header or with oversized dimensions before decoding', async () => {
+  const { manager } = await setup();
+  const truncated = png().subarray(0, 32);
+  const wrongLength = png();
+  wrongLength.writeUInt32BE(12, 8);
+  await expect(manager.add(truncated)).rejects.toThrow('The capture is not a PNG.');
+  await expect(manager.add(wrongLength)).rejects.toThrow('The capture is not a PNG.');
+  await expect(manager.add(png(0, 480))).rejects.toThrow('dimensions exceed safe limits');
+  await expect(manager.add(png(1_000_000, 1))).rejects.toThrow('dimensions exceed safe limits');
 });

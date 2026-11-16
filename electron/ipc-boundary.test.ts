@@ -598,6 +598,16 @@ describe('wrongly typed payloads', () => {
 
 const revision = 'a'.repeat(64);
 const pngDataUrl = 'data:image/png;base64,iVBORw0KGgo=';
+// Each was rejected by the former pattern /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.
+const malformedPngDataUrls = [
+  ['an embedded space', 'data:image/png;base64,iVBO Rw0KGgo='],
+  ['a trailing newline', 'data:image/png;base64,iVBORw0KGgo=\n'],
+  ['URL-safe characters', 'data:image/png;base64,iVBO-w0K_go='],
+  ['three padding characters', 'data:image/png;base64,iVBORw0KGg==='],
+  ['padding in the middle', 'data:image/png;base64,iV=ORw0KGgo='],
+  ['an empty payload', 'data:image/png;base64,'],
+  ['a JPEG prefix', 'data:image/jpeg;base64,iVBORw0KGgo='],
+] as const;
 const snapshotId = `snapshot-20260101T000000000Z-${'0'.repeat(32)}`;
 const sessionId = '123e4567-e89b-42d3-a456-426614174000';
 const projectData = () => emptyProject('Project', '');
@@ -992,6 +1002,11 @@ const invalidCases: Record<string, InvalidCase[]> = {
     ['system:open-path', 'an empty path', ['']],
     ['system:copy-text', 'oversized text', [long(2_000_001)]],
     ['system:copy-image', 'a remote image', ['https://example.com/image.png']],
+    ...malformedPngDataUrls.map(([label, dataUrl]): InvalidCase => [
+      'system:copy-image',
+      `a data URL with ${label}`,
+      [dataUrl],
+    ]),
     ['system:copy-context', 'an unknown field', [{ markdown: 'a', imageDataUrl: pngDataUrl, path: anyPath }]],
     [
       'onboarding:prepare-handoff',
@@ -1066,6 +1081,11 @@ const invalidCases: Record<string, InvalidCase[]> = {
     ],
     ['workflow:prompt-export:write', 'bundle number zero', [{ sessionId, bundleNumber: 0, markdown: 'a' }]],
     ['workflow:prompt-export:write', 'empty markdown', [{ sessionId, bundleNumber: 1, markdown: '' }]],
+    ...malformedPngDataUrls.map(([label, pngDataUrl]): InvalidCase => [
+      'workflow:prompt-export:write',
+      `a PNG data URL with ${label}`,
+      [{ sessionId, bundleNumber: 1, pngDataUrl, markdown: 'a' }],
+    ]),
     ...withNames('workflow:prompt-export:write', 'source filename', (name) => [
       { sessionId, bundleNumber: 1, markdown: 'a', sourceAssets: [{ filename: name, source: '{}' }] },
     ]).filter(([, label]) => !/trailing|nul/.test(label)),
@@ -1165,6 +1185,70 @@ describe('invalid payloads by handler module', () => {
       expect(authorize).not.toHaveBeenCalled();
       expect(reached).toEqual([]);
     });
+  });
+});
+
+describe('oversized PNG data URLs', () => {
+  // Valid base64 apart from length, so only the length limit can reject them.
+  const oversized = (length: number) => `data:image/png;base64,${'A'.repeat(length - 22)}`;
+  const base64Decodes = (spy: { mock: { calls: unknown[][] } }) =>
+    spy.mock.calls.filter((call) => call[1] === 'base64');
+
+  it.each([
+    ['system:copy-image', [oversized(100_000_001)], z.tuple([z.string().max(100_000_000)])],
+    [
+      'system:copy-context',
+      [{ markdown: 'a', imageDataUrl: oversized(100_000_001) }],
+      z.tuple([
+        z
+          .object({ markdown: z.string(), imageDataUrl: z.string().max(100_000_000).max(32_000_000) })
+          .strict(),
+      ]),
+    ],
+    [
+      'onboarding:prepare-handoff',
+      [
+        {
+          markdown: 'a',
+          imageDataUrl: oversized(32_000_001),
+          markdownFilename: 'component-search.md',
+          pngFilename: 'component-search.png',
+        },
+      ],
+      z.tuple([z.object({ imageDataUrl: z.string().max(100_000_000).max(32_000_000) }).passthrough()]),
+    ],
+  ] as const)('%s reports only the length issue and never decodes', async (channel, args, lengthOnly) => {
+    const spy = vi.spyOn(Buffer, 'from');
+    try {
+      const parsed = contracts[channel].safeParse(args);
+      expect(parsed.success).toBe(false);
+      expect(parsed.error?.issues).toEqual(lengthOnly.safeParse(args).error?.issues);
+      await expect(entry(channel).invoke(trusted, ...args)).rejects.toMatchObject({ name: 'ZodError' });
+      expect(base64Decodes(spy)).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(reached).toEqual([]);
+  });
+
+  it('rejects an oversized prompt export image without decoding it', async () => {
+    const spy = vi.spyOn(Buffer, 'from');
+    try {
+      const outcome = await entry('workflow:prompt-export:write').invoke(trusted, {
+        sessionId,
+        bundleNumber: 1,
+        pngDataUrl: oversized(134_000_001),
+        markdown: 'a',
+      });
+      expect(failure(outcome)).toMatchObject({
+        ok: false,
+        error: { code: 'invalid-input', message: 'The request contains invalid or unsupported values.' },
+      });
+      expect(base64Decodes(spy)).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(reached).toEqual([]);
   });
 });
 
