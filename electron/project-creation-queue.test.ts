@@ -57,6 +57,42 @@ describe('project creation queue', () => {
     await expect(withinProjectCreationQueue(async () => 'next')).resolves.toBe('next');
   });
 
+  it('makes async work left behind by a finished operation wait for the current holder', async () => {
+    const events: string[] = [];
+    let releaseChild!: () => void;
+    const childGate = new Promise<void>((resolve) => (releaseChild = resolve));
+    let releaseB!: () => void;
+    const bGate = new Promise<void>((resolve) => (releaseB = resolve));
+    let markBStarted!: () => void;
+    const bStarted = new Promise<void>((resolve) => (markBStarted = resolve));
+    let child!: Promise<void>;
+    // Review reproduction: A starts a detached async child and finishes without awaiting it.
+    await withinProjectCreationQueue(async () => {
+      events.push('A');
+      child = (async () => {
+        await childGate;
+        await withinProjectCreationQueue(async () => {
+          events.push('child');
+        });
+      })();
+    });
+    const b = withinProjectCreationQueue(async () => {
+      events.push('B start');
+      markBStarted();
+      await bGate;
+      events.push('B end');
+    });
+    await bStarted;
+    releaseChild();
+    // Give the child every chance to run if it wrongly reused A's finished turn.
+    for (let tick = 0; tick < 20; tick++) await new Promise((resolve) => setImmediate(resolve));
+    expect(events).toEqual(['A', 'B start']);
+    releaseB();
+    await b;
+    await child;
+    expect(events).toEqual(['A', 'B start', 'B end', 'child']);
+  });
+
   it('keeps running later operations after one fails', async () => {
     const failed = withinProjectCreationQueue(async () => {
       throw new Error('disk unavailable');
