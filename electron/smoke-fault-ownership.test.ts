@@ -47,7 +47,7 @@ async function proofFixture() {
     profileRoot,
     artifactRoot,
     launcherPid: process.pid,
-    caseSet: 'restore-eio',
+    caseSet: 'restore-errno',
     ...build,
     suppliedExecutable: executable,
     buildSha256: faultDigest(JSON.stringify(build)),
