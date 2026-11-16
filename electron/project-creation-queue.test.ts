@@ -12,7 +12,8 @@ afterEach(async () => {
 });
 
 async function workspace(): Promise<string> {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-creation-queue-'));
+  // macOS tmpdir is under /var, a symlink to /private/var; workspaces must be real paths.
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-creation-queue-')));
   roots.push(root);
   return root;
 }
