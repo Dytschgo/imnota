@@ -156,6 +156,7 @@ Measure each slice first. Use React Profiler commit counts and durations on a 10
 1. **Render boundaries.**
    - Problem: each description keystroke or annotation commit replaces `snapshot`, which `App` and `AppShell` select. Whole-store `useAppStore()` subscriptions remain in `Workspace`, `CollectionRail` (2), `ScreenshotComparison` (2), `Library` and `SettingsView`, and nothing in `src/renderer` uses `React.memo`.
    - Change: narrow those selectors, then memoize the rail row, inspector and canvas with stable props. Do one boundary per PR.
+   - In review (#338): selectors narrowed and the three boundaries memoized together. In a 100-screenshot Profiler harness, a description keystroke re-renders 1 rail row instead of 200 and the inspector once instead of twice, and skips the canvas. An annotation commit re-renders only the canvas.
 2. **Canvas frame cost.**
    - Cache pixelation output per annotation; today `AnnotationCanvas` rebuilds every region on each pointer move.
    - Batch pointer pan and draft updates per animation frame, following the wheel-input pattern from #243.
@@ -175,6 +176,7 @@ Measure each slice first. Use React Profiler commit counts and durations on a 10
    - Write a short design first. It changes the snapshot contract and enables the rail virtualization in [the large-collection plan](large-collection-performance-plan.md).
 6. **Smaller items.**
    - Bound and coalesce description undo history, which is currently unbounded with one entry per keystroke.
+     In review (#338): a typing burst is one undo step, with at most 100 steps per screenshot.
    - Validate each PNG data URL once in the prompt-bundle path instead of twice. Measured: 49 ms per 8 MiB image per pass. In review (#335): the regex is replaced by a native decode check of about 2.5 ms; the IPC schema and the workflow each keep one check.
    - Convert the backdrop and What's New PNGs (about 15 MB) to WebP or AVIF. Run visual regression and record artwork provenance.
 

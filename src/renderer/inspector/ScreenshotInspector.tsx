@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
 import { Copy, PanelRight, Trash2, Undo2 } from 'lucide-react';
 import type { Annotation, ScreenshotRecord } from '../../shared/types';
 import { ANNOTATION_COLORS } from '../canvas/annotation-layout';
@@ -21,7 +21,8 @@ export interface ScreenshotInspectorProps {
   sourceContextEnabled?: boolean;
 }
 
-export function ScreenshotInspector({
+/** Memoized: Workspace keeps its handlers stable, so canvas-only changes skip the inspector. */
+export const ScreenshotInspector = memo(function ScreenshotInspector({
   headerAction,
   shot,
   selectedAnnotation,
@@ -304,4 +305,4 @@ export function ScreenshotInspector({
       </div>
     </aside>
   );
-}
+});
