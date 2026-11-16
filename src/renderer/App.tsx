@@ -35,6 +35,12 @@ import { liveTextColor, semanticAnnotationColor } from './canvas/annotation-layo
 import { dispatchCanvasCommand } from './canvas/commands';
 import { continuesUndoStep, type AnnotationChangeOptions } from './canvas/undo-coalescing';
 import { ANNOTATION_UNDO_LIMIT, pushBounded } from './canvas/undo-history';
+import {
+  EMPTY_DESCRIPTION_UNDO,
+  canUndoDescription,
+  recordDescriptionEdit,
+  undoDescriptionEdit,
+} from './inspector/description-undo';
 import { Logo } from './components/Logo';
 import type { ToolChoice } from './components/Toolbar';
 import { Button, IconButton, Modal } from './components/ui';
@@ -147,7 +153,7 @@ export default function App() {
   const [history, setHistory] = useState<Annotation[][]>([]);
   const annotationUndoKey = useRef<string | null>(null);
   const [redo, setRedo] = useState<Annotation[][]>([]);
-  const [descriptionHistory, setDescriptionHistory] = useState<Record<string, string[]>>({});
+  const [descriptionHistory, setDescriptionHistory] = useState(EMPTY_DESCRIPTION_UNDO);
   const [error, setError] = useState('');
   /** macOS Screen Recording help attached to the error it explains. */
   const [permissionHelp, setPermissionHelp] = useState<{
@@ -697,19 +703,17 @@ export default function App() {
   }, [persistence, redo]);
   function changeDescription(value: string) {
     if (!activeShot || value === activeShot.description) return;
-    setDescriptionHistory((items) => ({
-      ...items,
-      [activeShot.id]: [...(items[activeShot.id] ?? []), activeShot.description],
-    }));
+    // Consecutive keystrokes form one bounded undo step instead of one full copy per keystroke.
+    setDescriptionHistory((items) =>
+      recordDescriptionEdit(items, activeShot.id, activeShot.description, Date.now()),
+    );
     updateShot({ description: value });
   }
   function undoDescription() {
     if (!activeShot) return;
-    const values = descriptionHistory[activeShot.id] ?? [];
-    const previous = values.at(-1);
-    if (previous === undefined) return;
-    setDescriptionHistory((items) => ({ ...items, [activeShot.id]: values.slice(0, -1) }));
-    updateShot({ description: previous });
+    const undone = undoDescriptionEdit(descriptionHistory, activeShot.id);
+    setDescriptionHistory(undone.state);
+    if (undone.previous !== undefined) updateShot({ description: undone.previous });
   }
 
   function clearSearchSelection() {
@@ -2364,7 +2368,7 @@ export default function App() {
               setHistory([]);
               annotationUndoKey.current = null;
               setRedo([]);
-              setDescriptionHistory({});
+              setDescriptionHistory(EMPTY_DESCRIPTION_UNDO);
               setSelectedAnnotationId(null);
               copiedAnnotation.current = null;
               setProjectSessionGeneration((generation) => generation + 1);
@@ -2466,7 +2470,7 @@ export default function App() {
             saveState={persistence.saveState}
             canUndo={history.length > 0}
             canRedo={redo.length > 0}
-            canUndoDescription={Boolean(activeShot && descriptionHistory[activeShot.id]?.length)}
+            canUndoDescription={canUndoDescription(descriptionHistory, activeShot?.id)}
             shortcutLabels={{
               select: shortcutLabel('tool.select'),
               text: shortcutLabel('tool.text'),

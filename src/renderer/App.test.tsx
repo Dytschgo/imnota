@@ -2419,6 +2419,16 @@ describe('feedback controls', () => {
     expect(note).toHaveValue('Original note');
   });
 
+  it('undoes a burst of description keystrokes in one step', async () => {
+    const { note } = await renderEditingProject();
+    for (const value of ['Original note.', 'Original note. M', 'Original note. Mo', 'Original note. More'])
+      fireEvent.change(note, { target: { value } });
+    const undo = screen.getByRole('button', { name: 'Undo description' });
+    fireEvent.click(undo);
+    expect(note).toHaveValue('Original note');
+    expect(undo).toBeDisabled();
+  });
+
   it('shares the semantic text color and manual override between Select and Text creation', async () => {
     await renderEditingProject();
     await waitFor(() =>

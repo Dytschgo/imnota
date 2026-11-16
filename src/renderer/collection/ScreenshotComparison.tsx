@@ -4,6 +4,7 @@ import type { ProjectData, ScreenshotComparison as Pair } from '../../shared/typ
 import { comparisonLabels } from '../../shared/screenshot-comparison';
 import { nowIso } from '../../shared/utils';
 import { Button, IconButton, Modal } from '../components/ui';
+import { useShallow } from 'zustand/react/shallow';
 import { useAppStore } from '../store';
 import { renderAnnotatedImageWithDimensions, type AnnotatedImageRender } from '../export-image';
 import './screenshot-comparison.css';
@@ -14,24 +15,33 @@ interface Props {
 }
 
 export function ScreenshotComparison(props: Props) {
-  const store = useAppStore();
+  // Select only what the trigger shows, so description and annotation edits do not re-render it.
+  const { collection, screenshotCount } = useAppStore(
+    useShallow((state) => {
+      const collection = state.snapshot?.project.collections.find(
+        (entry) => entry.id === state.activeCollectionId,
+      );
+      return {
+        collection,
+        screenshotCount: collection
+          ? (state.snapshot?.project.screenshots.filter((shot) => shot.collectionId === collection.id)
+              .length ?? 0)
+          : 0,
+      };
+    }),
+  );
   const [open, setOpen] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
-  const collection = store.snapshot?.project.collections.find(
-    (entry) => entry.id === store.activeCollectionId,
-  );
-  const screenshots =
-    store.snapshot?.project.screenshots.filter((shot) => shot.collectionId === collection?.id) ?? [];
-  if (!collection || !store.snapshot) return null;
+  if (!collection) return null;
   return (
     <>
       <IconButton
         data-testid="compare-screenshots"
         className="comparison-trigger"
         label="Compare screenshots"
-        disabled={busy || (!collection.comparison && screenshots.length < 2)}
+        disabled={busy || (!collection.comparison && screenshotCount < 2)}
         onClick={async () => {
           if (pending.current) return;
           pending.current = true;
@@ -58,7 +68,13 @@ export function ScreenshotComparison(props: Props) {
 }
 
 function ComparisonDialog({ onFlush, onSaveProject, onClose }: Props & { onClose(): void }) {
-  const store = useAppStore();
+  const store = useAppStore(
+    useShallow((state) => ({
+      snapshot: state.snapshot,
+      activeCollectionId: state.activeCollectionId,
+      activeScreenshotId: state.activeScreenshotId,
+    })),
+  );
   const identity = useRef({
     path: store.snapshot!.projectPath,
     collectionId: store.activeCollectionId,

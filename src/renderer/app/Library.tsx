@@ -5,6 +5,7 @@ import { ProjectIcon } from '../components/ProjectIcon';
 import { Button, EmptyState, IconButton } from '../components/ui';
 import { relativeOpenedTime, resolveRecentCollections } from '../navigation-history';
 import { ContentSearchResults } from '../search/ContentSearchResults';
+import { useShallow } from 'zustand/react/shallow';
 import { useAppStore } from '../store';
 
 export function Library({
@@ -35,7 +36,16 @@ export function Library({
   onFilter(view: 'projects' | 'favourites' | 'archived'): void | Promise<void>;
   onSelectContentResult(result: ContentSearchResult): void;
 }) {
-  const { projects, search, set, view, settings, recentCollections } = useAppStore();
+  const { projects, search, set, view, settings, recentCollections } = useAppStore(
+    useShallow((state) => ({
+      projects: state.projects,
+      search: state.search,
+      set: state.set,
+      view: state.view,
+      settings: state.settings,
+      recentCollections: state.recentCollections,
+    })),
+  );
   const recent = resolveRecentCollections(projects, recentCollections).filter((entry) =>
     `${entry.name} ${entry.projectName}`.toLowerCase().includes(search.trim().toLowerCase()),
   );
