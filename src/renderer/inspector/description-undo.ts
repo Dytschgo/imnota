@@ -47,6 +47,11 @@ export function undoDescriptionEdit(
   return { state: { stacks: { ...state.stacks, [shotId]: values.slice(0, -1) }, step: null }, previous };
 }
 
+/** Ends the open typing step, so the next edit starts a new undo step (e.g. after navigation). */
+export function closeDescriptionStep(state: DescriptionUndo): DescriptionUndo {
+  return state.step ? { ...state, step: null } : state;
+}
+
 export function canUndoDescription(state: DescriptionUndo, shotId: string | undefined): boolean {
   return Boolean(shotId && state.stacks[shotId]?.length);
 }

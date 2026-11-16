@@ -36,6 +36,7 @@ import { dispatchCanvasCommand } from './canvas/commands';
 import { continuesUndoStep, type AnnotationChangeOptions } from './canvas/undo-coalescing';
 import { ANNOTATION_UNDO_LIMIT, pushBounded } from './canvas/undo-history';
 import {
+  closeDescriptionStep,
   EMPTY_DESCRIPTION_UNDO,
   canUndoDescription,
   recordDescriptionEdit,
@@ -156,6 +157,8 @@ export default function App() {
   const annotationUndoKey = useRef<string | null>(null);
   const [redo, setRedo] = useState<Annotation[][]>([]);
   const [descriptionHistory, setDescriptionHistory] = useState(EMPTY_DESCRIPTION_UNDO);
+  // Selecting another screenshot ends the typing step, even if the user returns within the pause.
+  useEffect(() => setDescriptionHistory(closeDescriptionStep), [store.activeScreenshotId]);
   const [error, setError] = useState('');
   /** macOS Screen Recording help attached to the error it explains. */
   const [permissionHelp, setPermissionHelp] = useState<{
