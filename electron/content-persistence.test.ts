@@ -11,9 +11,11 @@ import { validateProject } from '../src/shared/schema.js';
 import { emptyProject } from '../src/shared/utils.js';
 import {
   ContentPersistenceService,
+  drawingPngDimensions,
   EMPTY_DRAWING_PNG,
   EMPTY_EXCALIDRAW_SOURCE,
 } from './content-persistence.js';
+import { ihdrChunk, pngChunk, syntheticPng } from '../src/test/png-fixtures.js';
 import { contentItemRelativePaths } from './content-paths.js';
 import { recoverContentTrashTransactions } from './content-trash.js';
 import { BackupService } from './backup-service.js';
@@ -880,5 +882,114 @@ describe('native mixed content persistence', () => {
       expect.arrayContaining(['content-0000.bin', 'manifest.json', 'metadata-before.bin']),
     );
     expect(await recoverContentTrashTransactions(projectPath)).toEqual([]);
+  });
+});
+
+describe('drawing PNG structural messages', () => {
+  it('keeps its own message for each structural defect', () => {
+    const valid = syntheticPng(4, 3);
+    const idat = pngChunk('IDAT', Buffer.alloc(3));
+    const iend = pngChunk('IEND');
+    const flipped = (index: number) => {
+      const copy = Buffer.from(valid);
+      copy[index] ^= 1;
+      return copy;
+    };
+    const cases: Array<[Uint8Array, string]> = [
+      [valid.subarray(0, 32), 'Drawing image is not a valid PNG.'],
+      [flipped(0), 'Drawing image is not a valid PNG.'],
+      [
+        syntheticPng(4, 3, [pngChunk('tEXt', Buffer.alloc(13)), idat, iend]),
+        'Drawing image is not a valid PNG.',
+      ],
+      [syntheticPng(16_385, 1), 'Drawing image dimensions are outside supported limits.'],
+      [syntheticPng(8_000, 8_000), 'Drawing image dimensions are outside supported limits.'],
+      [
+        syntheticPng(4, 3, [ihdrChunk(4, 3, { 8: 16 }), idat, iend]),
+        'Drawing PNG uses unsupported encoding.',
+      ],
+      [syntheticPng(4, 3, [ihdrChunk(4, 3, { 9: 1 }), idat, iend]), 'Drawing PNG uses unsupported encoding.'],
+      [Buffer.concat([valid.subarray(0, 33), idat, Buffer.alloc(5)]), 'Drawing PNG is truncated.'],
+      [
+        Buffer.concat([
+          valid.subarray(0, valid.length - 12),
+          Buffer.from([0, 0, 0, 99]),
+          Buffer.from('IEND'),
+          Buffer.alloc(20),
+        ]),
+        'Drawing PNG contains a truncated chunk.',
+      ],
+      [flipped(valid.length - 20), 'Drawing PNG IDAT chunk failed CRC validation.'],
+      [
+        syntheticPng(4, 3, [
+          ihdrChunk(4, 3),
+          idat,
+          ...Array.from({ length: 9_998 }, () => pngChunk('tEXt')),
+          iend,
+        ]),
+        'Drawing PNG contains too many chunks.',
+      ],
+      [
+        syntheticPng(4, 3, [ihdrChunk(4, 3), idat, pngChunk('IEND', Buffer.alloc(1))]),
+        'Drawing PNG has an invalid ending.',
+      ],
+      [Buffer.concat([valid, Buffer.alloc(1)]), 'Drawing PNG has an invalid ending.'],
+      [syntheticPng(4, 3, [ihdrChunk(4, 3), iend, idat]), 'Drawing PNG has an invalid ending.'],
+      [syntheticPng(4, 3, [ihdrChunk(4, 3), iend]), 'Drawing PNG is incomplete.'],
+      [syntheticPng(4, 3, [ihdrChunk(4, 3), idat]), 'Drawing PNG is incomplete.'],
+    ];
+    expect(drawingPngDimensions(valid)).toEqual({ width: 4, height: 3 });
+    // A repeated IHDR stays an ordinary ancillary-looking chunk for drawings, as before.
+    expect(drawingPngDimensions(syntheticPng(4, 3, [ihdrChunk(4, 3), ihdrChunk(4, 3), idat, iend]))).toEqual({
+      width: 4,
+      height: 3,
+    });
+    for (const [bytes, message] of cases) expect(() => drawingPngDimensions(bytes), message).toThrow(message);
+  });
+
+  it('rejects chunk types that are not ASCII letters, including high-bit aliases of critical chunks', () => {
+    const idat = pngChunk('IDAT', Buffer.alloc(3));
+    const iend = pngChunk('IEND');
+    // Review reproduction: an empty, correctly CRC'd chunk typed C9 45 4E 44 between IHDR
+    // and IDAT, with a normal final IEND. The former validator read it as an early IEND.
+    const reproduction = Buffer.from('\u00c9END', 'latin1');
+    expect([...reproduction]).toEqual([0xc9, 0x45, 0x4e, 0x44]);
+    for (const type of ['\u00c9END', '\u00c9HDR', '\u00c9DAT', 'I\u00c4AT', 'IEN\u00c4', '1HDR'])
+      expect(
+        () => drawingPngDimensions(syntheticPng(4, 3, [ihdrChunk(4, 3), pngChunk(type), idat, iend])),
+        type,
+      ).toThrow('Drawing PNG contains an invalid chunk type.');
+    // A high-bit alias in place of the first IHDR is not a header at all.
+    const aliasedHeader = Buffer.from(syntheticPng(4, 3));
+    aliasedHeader[12] = 0xc9;
+    expect(() => drawingPngDimensions(aliasedHeader)).toThrow('Drawing image is not a valid PNG.');
+  });
+
+  it('rejects an oversized drawing data URL with its size message before decoding it', async () => {
+    const { projectPath, service } = await fixture();
+    const created = await service.create({ projectPath, collectionId: '001-collection', kind: 'drawing' });
+    const item = created.project.contentItems![0];
+    const loaded = await service.load({ projectPath, itemId: item.id });
+    const save = (dataUrl: string) =>
+      service.save({
+        projectPath,
+        itemId: item.id,
+        contentRevision: loaded.contentRevision,
+        source: loaded.source!,
+        image: { ...loaded.image!, dataUrl },
+      });
+    // 'A' * n decodes to floor(3n / 4) bytes: this is one character past the longest
+    // payload that still fits in 100,000,000 bytes, with room for two '=' characters.
+    const oversized = `data:image/png;base64,${'A'.repeat(133_333_335)}==`;
+    const decodes = vi.spyOn(Buffer, 'from');
+    await expect(save(oversized)).rejects.toThrow('Drawing PNG is too large.');
+    await expect(save(`data:image/png;base64,${'*'.repeat(133_333_337)}`)).rejects.toThrow(
+      'Drawing PNG is too large.',
+    );
+    expect(decodes.mock.calls.filter((call: unknown[]) => call[1] === 'base64')).toEqual([]);
+    decodes.mockRestore();
+    await expect(save('data:image/png;base64,AA AA')).rejects.toThrow(
+      'Drawing image must be a base64 PNG data URL.',
+    );
   });
 });

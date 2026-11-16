@@ -23,13 +23,12 @@ import {
   type StoredPromptBundle,
 } from './prompt-bundle-store.js';
 import { clipboardFailure, filesystemFailure, NativeWorkflowError } from './workflow-errors.js';
+import { decodePngDataUrl, maxPngDataUrlLength, PNG_DATA_URL_PREFIX } from './png-data-url.js';
 import { formatTerminalHandoff, TerminalPathError } from '../src/shared/terminal-handoff.js';
 
-const PNG_DATA_URL_PREFIX = 'data:image/png;base64,';
-const MAX_PNG_DATA_URL_CHARACTERS =
-  PNG_DATA_URL_PREFIX.length + Math.ceil(MAX_PROMPT_BUNDLE_PNG_BYTES / 3) * 4;
-const PNG_DATA_URL = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/;
-const MAX_FINALIZED_GRANTS = 128;
+const MAX_PNG_DATA_URL_CHARACTERS = maxPngDataUrlLength(MAX_PROMPT_BUNDLE_PNG_BYTES);
+/** Finalized sessions whose read/copy grants stay available, oldest finalization evicted first. */
+export const DEFAULT_MAX_FINALIZED_GRANTS = 128;
 
 export interface AuthorizedPromptCollection {
   projectPath: string;
@@ -105,12 +104,12 @@ function publicFinalized(result: FinalizedPromptBundleSession): PromptExportFina
   };
 }
 
-function decodePngDataUrl(dataUrl: string): Uint8Array {
+function promptPngFromDataUrl(dataUrl: string): Uint8Array {
   if (typeof dataUrl !== 'string' || dataUrl.length > MAX_PNG_DATA_URL_CHARACTERS)
     throw new NativeWorkflowError('invalid-input', 'Prompt PNG is empty or too large.');
-  const match = PNG_DATA_URL.exec(dataUrl);
-  if (!match) throw new NativeWorkflowError('invalid-input', 'Prompt image must be a PNG data URL.');
-  return Buffer.from(match[1], 'base64');
+  const png = decodePngDataUrl(dataUrl, MAX_PNG_DATA_URL_CHARACTERS);
+  if (!png) throw new NativeWorkflowError('invalid-input', 'Prompt image must be a PNG data URL.');
+  return png;
 }
 
 async function readBoundedRegularFile(
@@ -144,13 +143,26 @@ async function readBoundedRegularFile(
   }
 }
 
+export interface PromptBundleWorkflowOptions {
+  /** Defaults to {@link DEFAULT_MAX_FINALIZED_GRANTS}; tests lower it to exercise eviction cheaply. */
+  maxFinalizedGrants?: number;
+}
+
 export class PromptBundleWorkflow {
   private readonly grants = new Map<string, SessionGrant>();
+
+  private readonly maxFinalizedGrants: number;
 
   constructor(
     private readonly dependencies: PromptBundleWorkflowDependencies,
     private readonly store: PromptBundleStore,
-  ) {}
+    options: PromptBundleWorkflowOptions = {},
+  ) {
+    const { maxFinalizedGrants = DEFAULT_MAX_FINALIZED_GRANTS } = options;
+    if (!Number.isInteger(maxFinalizedGrants) || maxFinalizedGrants < 1)
+      throw new RangeError('maxFinalizedGrants must be a positive integer.');
+    this.maxFinalizedGrants = maxFinalizedGrants;
+  }
 
   async start(
     projectPath: string,
@@ -184,7 +196,7 @@ export class PromptBundleWorkflow {
       await this.store.commitBundle({
         sessionId,
         bundleNumber,
-        png: pngDataUrl === undefined ? undefined : decodePngDataUrl(pngDataUrl),
+        png: pngDataUrl === undefined ? undefined : promptPngFromDataUrl(pngDataUrl),
         markdown,
         sourceAssets,
       }),
@@ -399,7 +411,7 @@ export class PromptBundleWorkflow {
     });
     let finalizedCount = 0;
     for (const grant of this.grants.values()) if (grant.phase === 'final') finalizedCount++;
-    if (finalizedCount > MAX_FINALIZED_GRANTS) {
+    if (finalizedCount > this.maxFinalizedGrants) {
       for (const [storedSessionId, grant] of this.grants) {
         if (grant.phase !== 'final') continue;
         this.grants.delete(storedSessionId);
