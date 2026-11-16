@@ -92,7 +92,7 @@ import { UpdateController, UpdateFailure } from './update-controller.js';
 import { discoverRelease, type ReleaseCandidate } from './releases.js';
 import { createCiReleaseMetadataRequest } from './release-metadata-request.js';
 import { prepareNativeUpdate } from './native-update.js';
-import { terminalUpdateArguments } from './terminal-update.js';
+import { detectMacHost, terminalUpdateArguments } from './terminal-update.js';
 import { startMacUpdate, type MacUpdateSession } from './macos-update.js';
 import { promptCollectionGrant, PromptBundleWorkflow } from './prompt-bundle-workflow.js';
 import { HostedShareClient } from './hosted-share-client.js';
@@ -886,21 +886,6 @@ async function uniqueProjectFolder(workspace: string, name: string): Promise<str
   return folder;
 }
 
-let projectCreationQueue: Promise<void> = Promise.resolve();
-async function withinProjectCreationQueue<T>(operation: () => Promise<T>): Promise<T> {
-  const previous = projectCreationQueue;
-  let release!: () => void;
-  projectCreationQueue = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await previous;
-  try {
-    return await operation();
-  } finally {
-    release();
-  }
-}
-
 async function uniqueStoredName(projectPath: string, original: string): Promise<string> {
   const ext = path.extname(original).toLowerCase() || '.png';
   const base = sanitizeFilename(portableFilename(path.basename(original, ext)), 'screenshot');
@@ -1648,7 +1633,6 @@ function createIpcHost() {
     uniqueProjectFolder,
     uniqueStoredName,
     withSnapshotWarnings,
-    withinProjectCreationQueue,
     workspaceOrThrow,
     get backupService() {
       return backupService;
@@ -2162,6 +2146,7 @@ function configureAutoUpdates(): void {
   // verifies in the background, then replaces and reopens the app once it quits.
   const macHelper = process.platform === 'darwin';
   const macAppPath = () => path.resolve(app.getPath('exe'), '../../..');
+  const macHost = detectMacHost(process.arch, macHelper && app.runningUnderARM64Translation);
   let macRelease: ReleaseCandidate | null = null;
   let macSession: MacUpdateSession | null = null;
   updateController = new UpdateController(settings.updateChannel, {
@@ -2174,7 +2159,7 @@ function configureAutoUpdates(): void {
     prepare: macHelper
       ? async (release) => {
           macRelease = null;
-          terminalUpdateArguments(release, macAppPath(), app.getVersion());
+          terminalUpdateArguments(release, macAppPath(), app.getVersion(), macHost);
           macRelease = release;
         }
       : (release, channel) => prepareNativeUpdate(autoUpdater, release, channel),
@@ -2191,6 +2176,7 @@ function configureAutoUpdates(): void {
               observerPath: path.join(process.resourcesPath, 'imnota-security-observer'),
               cachePath: app.getPath('temp'),
               currentVersion: app.getVersion(),
+              host: macHost,
             },
             {
               progress: (percent) => updateController.progress(percent),

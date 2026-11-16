@@ -175,7 +175,7 @@ Measure each slice first. Use React Profiler commit counts and durations on a 10
    - Write a short design first. It changes the snapshot contract and enables the rail virtualization in [the large-collection plan](large-collection-performance-plan.md).
 6. **Smaller items.**
    - Bound and coalesce description undo history, which is currently unbounded with one entry per keystroke.
-   - Validate each PNG data URL once in the prompt-bundle path instead of twice. Measured: 49 ms per 8 MiB image per pass.
+   - Validate each PNG data URL once in the prompt-bundle path instead of twice. Measured: 49 ms per 8 MiB image per pass. In review (#335): the regex is replaced by a native decode check of about 2.5 ms; the IPC schema and the workflow each keep one check.
    - Convert the backdrop and What's New PNGs (about 15 MB) to WebP or AVIF. Run visual regression and record artwork provenance.
 
 ### Phase 4: Trimming
@@ -206,9 +206,10 @@ The audit found about 1,600–1,800 removable or mergeable lines out of about 85
    - Change: add **Duplicate** to the project actions in the Library, open or select the new project on success, and show the existing error, including any retained incomplete folder.
    - Tier: application behaviour, with a UI test and a native walkthrough step. It is a user-visible change, so follow the [feedback delivery contract](feedback-delivery-contract.md) and update [the user guide](user-guide.md).
 4. **Consolidation.**
-   - One PNG parsing module with per-caller limits, replacing 8 implementations.
-   - One `loadKoffi` helper, replacing 3.
-   - One project-creation queue shared by blank and template creation. Today they use separate queues, so they can race; add a regression test.
+   - In review (#335):
+     - One PNG parsing module with per-caller limits, replacing 8 implementations.
+     - One `loadKoffi` helper, replacing 3.
+     - One project-creation queue shared by blank and template creation, with a regression test. The IPC router already serialized `projects:create`, so the race affected only direct callers of `createTemplateProject`.
 5. **Recovery helper unification.**
    - Problem: about 14 helpers are copied across `content-trash.ts`, `screenshot-trash.ts` and `screenshot-transactions.ts`, and the copies have drifted.
    - Gate: start only after the [recovery unification design](recovery-unification-design.md) is approved. Independent review is required.

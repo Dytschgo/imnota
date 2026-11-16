@@ -17,4 +17,4 @@ Priority appears in Markdown but never sorts screenshots. Export-time Picture nu
 
 Deleting is a separate action: the screenshot image, annotations and description move to the operating-system trash, and Imnota offers immediate Undo where restoration is supported.
 
-See the [user guide](user-guide.md) and [data format](data-format.md) for the current behavior.
+See the [user guide](../user-guide.md) and [data format](../data-format.md) for the current behavior.

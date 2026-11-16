@@ -2,7 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { terminalUpdateArguments } from './terminal-update.js';
+import { terminalUpdateArguments, type MacHost } from './terminal-update.js';
 import { copyMacSecurityObserver } from './macos-security-observer.js';
 import type { ReleaseCandidate } from './releases.js';
 import { UpdateFailure } from './update-controller.js';
@@ -106,12 +106,13 @@ export async function startMacUpdate(
     helperPath: string;
     cachePath: string;
     currentVersion: string;
+    host: MacHost;
     observerPath?: string;
   },
   events: SessionEvents,
   pollMs = 250,
 ): Promise<MacUpdateSession> {
-  const args = terminalUpdateArguments(release, options.appPath, options.currentVersion);
+  const args = terminalUpdateArguments(release, options.appPath, options.currentVersion, options.host);
   const directory = await fs.mkdtemp(path.join(options.cachePath, 'imnota-update-'));
   const helper = path.join(directory, 'update-macos.sh');
   const logPath = path.join(directory, 'update.log');
