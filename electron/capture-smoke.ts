@@ -1,4 +1,4 @@
-import { BrowserWindow, nativeImage, screen, type Display } from 'electron';
+import { BrowserWindow, nativeImage, screen, type Display, type NativeImage } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ProjectData } from '../src/shared/types.js';
@@ -12,6 +12,7 @@ import {
 import { screenshotPath } from './collections.js';
 import type { CaptureWindowCandidate } from './capture-windows.js';
 import { withSourceWindowFixture } from './source-window-fixture.js';
+import { chooseWindowsPromptCopyFunction } from './mixed-content-smoke.js';
 import { NativeUiDriver, type SmokeCapture } from './smoke-native-driver.js';
 import {
   createWindowsSmokePointer,
@@ -48,6 +49,37 @@ export interface CaptureSmokeResult {
 }
 
 const delay = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+
+/**
+ * Counts pixels matching any synthetic display color and pixels of the default red annotation
+ * stroke (#ef4444). Interior pixels survive bundle scaling; edges blend, hence the tolerances.
+ */
+function capturedExportPixels(
+  image: NativeImage,
+  displayCount: number,
+): { capture: number; annotation: number } {
+  if (image.isEmpty()) return { capture: 0, annotation: 0 };
+  const colors = Array.from({ length: displayCount }, (_, index) => syntheticCaptureColor(index));
+  const bitmap = image.toBitmap();
+  let capture = 0;
+  let annotation = 0;
+  for (let offset = 0; offset < bitmap.length; offset += 4) {
+    const blue = bitmap[offset]!;
+    const green = bitmap[offset + 1]!;
+    const red = bitmap[offset + 2]!;
+    if (
+      colors.some(
+        (color) =>
+          Math.abs(color.blue - blue) <= 3 &&
+          Math.abs(color.green - green) <= 3 &&
+          Math.abs(color.red - red) <= 3,
+      )
+    )
+      capture += 1;
+    else if (red > 180 && green < 120 && blue < 120) annotation += 1;
+  }
+  return { capture, annotation };
+}
 
 function smokeCaptureIsEnabled(): boolean {
   return process.env.IMNOTA_SMOKE === '1' && process.env.IMNOTA_SMOKE_CAPTURE_SOURCE === 'synthetic';
@@ -786,18 +818,36 @@ export async function exerciseRegionCapture(
   if (artifactDirectory)
     artifacts.push(await driver.capture(artifactDirectory, 'capture-annotation-synthetic.png', captured));
 
-  const exportPath = await driver.evaluate<string>(`(async () => {
-    const canvas = document.querySelector('.konvajs-content canvas');
-    if (!(canvas instanceof HTMLCanvasElement)) throw new Error('Annotation canvas was not rendered.');
-    return window.imnota.exportAnnotatedImage({
-      projectPath: ${JSON.stringify(projectPath)},
-      collectionId: ${JSON.stringify(captured.collectionId)},
-      filename: 'synthetic-capture-annotation.png',
-      dataUrl: canvas.toDataURL('image/png')
-    });
-  })()`);
-  const exported = await fs.stat(exportPath);
-  if (exported.size === 0) throw new Error('Synthetic capture annotation export is empty.');
+  // Export the annotated capture through the prompt bundle dialog the UI offers and check the
+  // copied bundle image. Windows defaults to Copy files, so use Rich copy there and restore it.
+  const promptDialog = '[data-testid="prompt-sharing-dialog"][aria-busy="false"]';
+  await driver.click({ selector: '[data-testid="share-prompt-bundles"]' });
+  await driver.waitFor(
+    { selector: `${promptDialog} [data-testid="copy-bundle-1"]:not(:disabled)` },
+    { timeoutMs: 30_000 },
+  );
+  await chooseWindowsPromptCopyFunction(driver, 'rich');
+  // The capture is the newest item, so copy the last bundle; the pixel check below fails loudly
+  // if the capture is not in it.
+  const lastBundle = await driver.evaluate<number>(
+    `Math.max(...[...document.querySelectorAll('[data-testid="prompt-sharing-dialog"] [data-testid^="copy-bundle-"]')].map(element => /^copy-bundle-([0-9]+)$/.exec(element.getAttribute('data-testid'))?.[1]).filter(Boolean).map(Number))`,
+  );
+  if (!Number.isInteger(lastBundle) || lastBundle < 1)
+    throw new Error('Prompt bundle dialog listed no copyable bundle.');
+  await driver.click({ selector: `[data-testid="copy-bundle-${lastBundle}"]` });
+  await driver.waitFor(
+    { selector: `${promptDialog} [data-testid="copy-bundle-${lastBundle}"].is-copied` },
+    { timeoutMs: 30_000 },
+  );
+  const copiedBundle = await nativeClipboard.readImage();
+  await chooseWindowsPromptCopyFunction(driver, 'files');
+  await driver.click({ selector: '[data-testid="prompt-sharing-close"]' });
+  await driver.waitFor({ selector: '[data-testid="prompt-sharing-dialog"]' }, { absent: true });
+  const observed = capturedExportPixels(copiedBundle, screen.getAllDisplays().length);
+  if (observed.capture < 500 || observed.annotation < 20)
+    throw new Error(
+      `Copied prompt bundle lacks the synthetic capture or its rectangle annotation: ${JSON.stringify(observed)}.`,
+    );
 
   overlay = await startCapture(driver);
   await selectRegion(overlay);

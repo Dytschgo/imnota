@@ -25,7 +25,7 @@ The living implementation document was deliberately moved to [`docs/implementati
 
 Additional archived records:
 
-- [October 31 VM reproducer](nightly-vm-reproducer-20261031.md): pinned historical installer verification, its partial Node 22 result, and a source check that refuses current main.
+- [October 31 VM reproducer](nightly-vm-reproducer-20261031.md): pinned historical installer verification, its partial Node 22 result, and where to find the removed reproducer in Git history.
 - [Feature verification](next-features-verification.md): September feature integration and 0.2.7 checks; its capture defaults and feature limits are historical.
 - [UI overhaul implementation](ui-overhaul/implementation.md) and its concept images: September desktop and hosted-service design delivery record, moved from `docs/ui-overhaul/`.
 - [UI feedback screenshots](ui-feedback/): visual evidence referenced by the September UI improvement record, moved from `docs/ui-feedback/`.

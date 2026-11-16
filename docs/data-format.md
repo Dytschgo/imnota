@@ -13,7 +13,7 @@ collections/001-collection/text/001-context.md
 collections/001-collection/exports/Collection 01 - 260907-184205/
   Collection 01 - 260907-184205 - 01.png
   Collection 01 - 260907-184205 - 01.md
-.imnota-recovery.json       # present only when recovery is needed
+.imnota-recovery.json       # legacy: written only by older builds; restored or set aside on open
 .imnota-transactions/      # interrupted multi-file save recovery
 .imnota-undo/               # local deletion recovery snapshots and journals
 ```

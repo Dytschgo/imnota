@@ -1277,7 +1277,3 @@ export class BackupService {
     }
   }
 }
-
-export function backupProjectFiles(project: ProjectData | LegacyProjectData): string[] {
-  return authoritativeProjectFiles(project);
-}

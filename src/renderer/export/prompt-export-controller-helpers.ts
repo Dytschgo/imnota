@@ -87,8 +87,6 @@ export const HARD_BUNDLE_MAX_EDGE = 16_384;
 export const HARD_BUNDLE_MAX_PIXELS = 64_000_000;
 // Encoded PNGs only, scoped to one export. Never retain decoded canvases or grow with collection size.
 export const MAX_RETAINED_EXPORT_CHARACTERS = 8 * 1024 * 1024;
-/** OCR is optional metadata: all screenshots in one Copy Bundle share this wait budget. */
-export const OCR_EXPORT_BUDGET_MS = 10_000;
 export let nextPlanId = 0;
 
 export function freezeDeep<T>(value: T): Readonly<T> {

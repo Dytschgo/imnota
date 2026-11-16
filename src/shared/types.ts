@@ -191,15 +191,6 @@ export interface ImagePayload {
   height: number;
 }
 
-export interface ExportRequest {
-  collectionId?: string;
-  projectPath: string;
-  markdown: string;
-  annotatedImages: Array<{ filename: string; dataUrl: string }>;
-  includeOriginal: boolean;
-  includeAnnotations: boolean;
-}
-
 /** Exact project.json bytes checked and committed by one native transaction. */
 export interface ProjectRevisionTransition {
   before: string;
@@ -270,7 +261,6 @@ export interface ImnotaBridge extends WorkflowBridge, ContentBridge, BackupBridg
   /** Deleted items of one project that can still be restored with their Undo token. */
   listRecentlyDeleted(projectPath: string): Promise<RecentlyDeletedItem[]>;
   duplicateProject(projectPath: string): Promise<ProjectSnapshot>;
-  archiveProject(projectPath: string): Promise<void>;
   updateProjectMetadata(input: {
     projectPath: string;
     expectedRevision: string;
@@ -282,13 +272,6 @@ export interface ImnotaBridge extends WorkflowBridge, ContentBridge, BackupBridg
     archived: boolean;
   }): Promise<ProjectSnapshot>;
   deleteProject(projectPath: string): Promise<void>;
-  exportAnnotatedImage(input: {
-    projectPath: string;
-    filename: string;
-    dataUrl: string;
-    collectionId?: string;
-  }): Promise<string>;
-  exportPackage(input: ExportRequest): Promise<{ folderPath: string; zipPath: string; count: number }>;
   openPath(targetPath: string): Promise<void>;
   openDiagnosticsFolder(): Promise<void>;
   copyText(text: string): Promise<void>;
@@ -305,12 +288,6 @@ export interface ImnotaBridge extends WorkflowBridge, ContentBridge, BackupBridg
     action: OnboardingHandoffAction;
   }): Promise<ClipboardFormatsReport | void>;
   openOnboardingHandoff(input: { sessionId: string; target: OnboardingHandoffOpenTarget }): Promise<void>;
-  saveRecovery(input: {
-    projectPath: string;
-    project: ProjectData;
-    annotations: Record<string, Annotation[]>;
-  }): Promise<void>;
-  clearRecovery(projectPath: string): Promise<void>;
   getDroppedFilePath(file: File): string;
   onUpdateStatus(handler: (status: UpdateStatus) => void): () => void;
   downloadUpdate(): Promise<void>;
