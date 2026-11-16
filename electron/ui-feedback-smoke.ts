@@ -698,6 +698,28 @@ export async function exerciseUiFeedback(
   });
   await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
   await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Renamed' });
+  // Duplicate through the row action. The copy opens, and must be a separate, complete project.
+  await driver.click({ selector: `[data-testid="project-duplicate-${fixture.projectId}"]` });
+  await driver.waitFor({ selector: '.toast', text: 'Project duplicated', exact: true });
+  await driver.waitFor({ selector: '[data-testid="workspace"]' });
+  await driver.waitFor({ selector: '.crumb-muted', text: 'Feedback Renamed copy', exact: true });
+  const duplicate = await driver.evaluate<{ projectPath: string; projectId: string }>(`(async () => {
+    const sourcePath=${JSON.stringify(fixture.projectPath)};
+    const itemId=${JSON.stringify(fixture.itemId)};
+    const copies=(await window.imnota.listProjects()).filter(project=>project.name==='Feedback Renamed copy');
+    if(copies.length!==1) throw new Error('Duplicate did not list exactly one copy.');
+    const source=await window.imnota.loadProject(sourcePath);
+    const copy=await window.imnota.loadProject(copies[0].projectPath);
+    if(copy.projectPath===source.projectPath || copy.project.id===source.project.id) throw new Error('Duplicate reused the source folder or identity.');
+    if(copy.project.screenshots.length!==source.project.screenshots.length || copy.project.collections.length!==source.project.collections.length) throw new Error('Duplicate did not copy every screenshot and collection.');
+    const text=await window.imnota.loadContentItem({projectPath:copy.projectPath,itemId});
+    if(!text.markdown?.includes('quartzmarkdownprobe')) throw new Error('Duplicate did not copy the Markdown content.');
+    return {projectPath:copy.projectPath,projectId:copy.project.id};
+  })()`);
+  await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
+  await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Renamed copy' });
+  if (artifactDirectory)
+    captures.push(await driver.capture(artifactDirectory, 'feedback-project-duplicated.png', 'none'));
   await driver.click({ selector: `[data-testid="project-delete-${fixture.projectId}"]` });
   await driver.waitFor({ selector: '[role="dialog"]', text: 'Delete Feedback Renamed?' });
   await driver.click({ text: 'Keep project', exact: true });
@@ -713,7 +735,8 @@ export async function exerciseUiFeedback(
   await host.approveNextProjectDeletion(fixture.projectPath);
   await driver.click({ text: 'Move to trash', exact: true });
   await driver.waitFor({ selector: '[role="dialog"]', text: 'Delete Feedback Renamed?' }, { absent: true });
-  await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Renamed' }, { absent: true });
+  // The copy's row also contains this name, so wait for the source row by identity.
+  await driver.waitFor({ selector: `[data-testid="project-delete-${fixture.projectId}"]` }, { absent: true });
   await driver.waitFor({ selector: '.toast', text: 'Project moved to the system trash', exact: true });
   try {
     await fs.access(fixture.projectPath);
@@ -721,6 +744,16 @@ export async function exerciseUiFeedback(
   } catch (error) {
     if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
   }
+  // Trashing the source leaves the independent copy; remove it too so later checks see one fixture.
+  await fs.access(`${duplicate.projectPath}/project.json`);
+  await driver.click({ selector: `[data-testid="project-delete-${duplicate.projectId}"]` });
+  await driver.waitFor({ selector: '[role="dialog"]', text: 'Delete Feedback Renamed copy?' });
+  await host.approveNextProjectDeletion(duplicate.projectPath);
+  await driver.click({ text: 'Move to trash', exact: true });
+  await driver.waitFor(
+    { selector: `[data-testid="project-delete-${duplicate.projectId}"]` },
+    { absent: true },
+  );
   await driver.click({ selector: '[data-testid="settings-button"]' });
   await driver.waitFor({ selector: '[data-testid="settings-view"]' });
   await driver.click({ selector: '.settings-navigation button', text: 'Workspace', exact: true });
