@@ -8,9 +8,11 @@ import type { ProjectSnapshot } from '../src/shared/types.js';
 import type { RecentlyDeletedItem } from '../src/shared/recently-deleted.js';
 import {
   nativeFaultCases,
+  nativeFaultErrno,
   FAULT_QUEUED_NAME,
   FAULT_DESCRIPTION,
   FAULT_MARKDOWN,
+  type NativeFaultCaseSet,
   type NativeFaultKind,
 } from '../src/shared/native-faults.js';
 import { COMMITTED_WRITE_WARNING } from '../src/shared/write-outcome.js';
@@ -352,7 +354,7 @@ async function restoreCase(
   );
   await driver.click({ selector: '[data-testid="recently-deleted-open"]' });
   await driver.click({ selector: `[data-testid="recently-deleted-${item.id}"] button` });
-  const success = ['restore-eio', 'restore-eacces', 'restore-eperm'].includes(controller.proof.caseSet);
+  const success = controller.proof.caseSet === 'restore-errno';
   const selector = '[data-testid="recently-deleted-dialog"]';
   await driver.waitFor({
     selector: `${selector} [role="${success ? 'status' : 'alert'}"]`,
@@ -688,7 +690,7 @@ async function recoveryCase(
   const first = await controller.command('observe');
   const firstFiles = await preserve(snapshot.projectPath, path.join(directory, 'first-save'));
   const firstCapture = await capture(driver, directory, 'recovery-refused-1280x800.png');
-  const lineage = controller.proof.caseSet.startsWith('recovery-lineage-');
+  const lineage = controller.proof.caseSet === 'recovery-lineage-errno';
   const firstMetadata = firstFiles.find((file) => file.relative === 'project.json');
   const firstProject = JSON.parse(await fs.readFile(path.join(snapshot.projectPath, 'project.json'), 'utf8'));
   requireThat(
@@ -727,7 +729,7 @@ async function recoveryCase(
       first.warning.includes(COMMITTED_WRITE_WARNING) && first.externalChange,
       'Recovery did not retain its real durability warning and watch outage.',
     );
-    if (caseId === 'foreign') await controller.writeForeignMetadata();
+    if (caseId.startsWith('foreign-')) await controller.writeForeignMetadata();
   }
   if (!lineage) {
     const journals = firstFiles.filter(
@@ -771,7 +773,7 @@ async function recoveryCase(
     );
     requireThat(first.pendingContent, 'Precommit failure discarded the real content draft.');
   }
-  const foreign = lineage && caseId === 'foreign';
+  const foreign = lineage && caseId.startsWith('foreign-');
   // One deliberate user retry, never an automatic test rerun.
   await observedSave(controller, !foreign, () =>
     driver.click({
@@ -1001,6 +1003,28 @@ async function uiCase(
   return { afterFiles, captures, consumed };
 }
 
+/**
+ * Every injection in one case's events came from that case. Errno-family cases share a
+ * launch, so each must inject at least once and only with its own errno.
+ */
+export function assertCaseInjections(
+  caseSet: NativeFaultCaseSet,
+  caseId: string,
+  events: ReadonlyArray<Record<string, unknown>>,
+): void {
+  const injected = events.filter((event) => event.event === 'injected');
+  requireThat(
+    injected.every((event) => event.caseId === caseId),
+    'An injected fault belongs to another case.',
+  );
+  if (caseSet !== 'restore-errno' && caseSet !== 'recovery-lineage-errno') return;
+  const errno = nativeFaultErrno(caseSet, caseId);
+  requireThat(
+    injected.length > 0 && injected.every((event) => event.errno === errno),
+    `Errno case ${caseId} did not inject only ${errno}.`,
+  );
+}
+
 export async function exerciseNativeFaultCases(
   driver: NativeUiDriver,
   host: SmokeWorkflowHost,
@@ -1033,6 +1057,7 @@ export async function exerciseNativeFaultCases(
           ? await uiCase(driver, host, controller, caseId, directory)
           : await recoveryCase(driver, host, controller, caseId, directory);
       controller.assertHealthy();
+      assertCaseInjections(controller.proof.caseSet, caseId, controller.events.slice(start));
       const result = {
         schemaVersion: 1,
         passed: true,
