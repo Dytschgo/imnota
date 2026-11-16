@@ -14,6 +14,7 @@ import {
   validatePromptBundlePng,
   type PromptBundleStoreDependencies,
 } from './prompt-bundle-store.js';
+import { ihdrChunk, pngChunk, syntheticPng } from '../src/test/png-fixtures.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -776,5 +777,66 @@ it('reports a missing collection folder as collection-not-found so recovery reop
   ).resolves.toMatchObject({
     ok: false,
     error: { code: 'collection-not-found', retryable: false, details: { errno: 'ENOENT' } },
+  });
+});
+
+describe('prompt PNG structural messages', () => {
+  it('keeps its own message for each structural defect', () => {
+    const valid = syntheticPng(4, 3);
+    const idat = pngChunk('IDAT', Buffer.alloc(3));
+    const iend = pngChunk('IEND');
+    const flipped = (index: number) => {
+      const copy = Buffer.from(valid);
+      copy[index] ^= 1;
+      return copy;
+    };
+    const cases: Array<[Uint8Array, string, { width: number; height: number }?]> = [
+      [valid.subarray(0, 56), 'Prompt PNG is empty, damaged, or too large to store.'],
+      [flipped(0), 'Prompt PNG has an invalid header.'],
+      [
+        syntheticPng(4, 3, [pngChunk('tEXt', Buffer.alloc(13)), ihdrChunk(4, 3), idat, iend]),
+        'Prompt PNG is missing its required header.',
+      ],
+      [
+        syntheticPng(20_000, 1),
+        'Prompt PNG dimensions exceed safe full-resolution storage limits.',
+        { width: 20_000, height: 1 },
+      ],
+      [valid, 'Prompt PNG dimensions do not match the reserved bundle manifest.', { width: 4, height: 4 }],
+      [
+        Buffer.concat([valid.subarray(0, 33), idat, pngChunk('tEXt'), Buffer.alloc(3)]),
+        'Prompt PNG is truncated.',
+      ],
+      [
+        Buffer.concat([
+          valid.subarray(0, valid.length - 12),
+          Buffer.from([0, 0, 0, 99]),
+          Buffer.from('IEND'),
+          Buffer.alloc(20),
+        ]),
+        'Prompt PNG contains a truncated chunk.',
+      ],
+      [flipped(valid.length - 20), 'Prompt PNG failed its integrity check.'],
+      [
+        syntheticPng(4, 3, [ihdrChunk(4, 3), ihdrChunk(4, 3), idat, iend]),
+        'Prompt PNG contains duplicate headers.',
+      ],
+      [
+        syntheticPng(4, 3, [ihdrChunk(4, 3), pngChunk('tEXt', Buffer.alloc(9)), iend, idat]),
+        'Prompt PNG has an invalid ending.',
+      ],
+      [
+        syntheticPng(4, 3, [ihdrChunk(4, 3), idat, pngChunk('IEND', Buffer.alloc(1))]),
+        'Prompt PNG has an invalid ending.',
+      ],
+      [Buffer.concat([valid, Buffer.alloc(1)]), 'Prompt PNG is incomplete or has trailing data.'],
+      [
+        syntheticPng(4, 3, [ihdrChunk(4, 3), idat, pngChunk('tEXt', Buffer.alloc(9))]),
+        'Prompt PNG is incomplete or has trailing data.',
+      ],
+    ];
+    expect(() => validatePromptBundlePng(valid, { width: 4, height: 3 })).not.toThrow();
+    for (const [bytes, message, expected = { width: 4, height: 3 }] of cases)
+      expect(() => validatePromptBundlePng(bytes, expected), message).toThrow(message);
   });
 });

@@ -3,11 +3,10 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { hasPngSignature } from '../src/shared/png.js';
+import { decodePngDataUrl, PNG_DATA_URL_PREFIX } from './png-data-url.js';
 
 const execFileDefault = promisify(execFileCallback);
-const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-const PNG_DATA_URL_PREFIX = 'data:image/png;base64,';
-const PNG_DATA_URL = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/;
 
 /** Keep OCR off the export critical path for huge captures; Copy Bundle still succeeds. */
 export const MAX_OCR_PNG_BYTES = 20 * 1024 * 1024;
@@ -90,32 +89,18 @@ function windowsPowershellPath(): string {
   );
 }
 
-function isPng(bytes: Uint8Array): boolean {
-  return (
-    bytes.length >= PNG_SIGNATURE.length &&
-    Buffer.from(bytes.subarray(0, PNG_SIGNATURE.length)).equals(PNG_SIGNATURE)
-  );
-}
-
 export function decodePngDataUrlForOcr(pngDataUrl: string): Uint8Array | undefined {
   if (typeof pngDataUrl !== 'string' || pngDataUrl.length > MAX_OCR_DATA_URL_CHARACTERS) return undefined;
-  const match = PNG_DATA_URL.exec(pngDataUrl);
-  if (!match) return undefined;
-  try {
-    const png = Buffer.from(match[1], 'base64');
-    if (png.length < PNG_SIGNATURE.length || png.length > MAX_OCR_PNG_BYTES || !isPng(png)) return undefined;
-    return png;
-  } catch {
-    return undefined;
-  }
+  const png = decodePngDataUrl(pngDataUrl);
+  return png && png.length <= MAX_OCR_PNG_BYTES && hasPngSignature(png) ? png : undefined;
 }
 
 function pngForOcr(png: Uint8Array, host: WindowsOcrHost): Uint8Array | undefined {
-  if (!isPng(png) || png.length > MAX_OCR_PNG_BYTES) return undefined;
+  if (!hasPngSignature(png) || png.length > MAX_OCR_PNG_BYTES) return undefined;
   if (!host.crop || !host.cropPng) return png;
   try {
     const cropped = host.cropPng(png, host.crop);
-    if (cropped && isPng(cropped) && cropped.length <= MAX_OCR_PNG_BYTES) return cropped;
+    if (cropped && hasPngSignature(cropped) && cropped.length <= MAX_OCR_PNG_BYTES) return cropped;
   } catch {
     return png;
   }

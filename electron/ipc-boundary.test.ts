@@ -598,6 +598,16 @@ describe('wrongly typed payloads', () => {
 
 const revision = 'a'.repeat(64);
 const pngDataUrl = 'data:image/png;base64,iVBORw0KGgo=';
+// Each was rejected by the former pattern /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.
+const malformedPngDataUrls = [
+  ['an embedded space', 'data:image/png;base64,iVBO Rw0KGgo='],
+  ['a trailing newline', 'data:image/png;base64,iVBORw0KGgo=\n'],
+  ['URL-safe characters', 'data:image/png;base64,iVBO-w0K_go='],
+  ['three padding characters', 'data:image/png;base64,iVBORw0KGg==='],
+  ['padding in the middle', 'data:image/png;base64,iV=ORw0KGgo='],
+  ['an empty payload', 'data:image/png;base64,'],
+  ['a JPEG prefix', 'data:image/jpeg;base64,iVBORw0KGgo='],
+] as const;
 const snapshotId = `snapshot-20260101T000000000Z-${'0'.repeat(32)}`;
 const sessionId = '123e4567-e89b-42d3-a456-426614174000';
 const projectData = () => emptyProject('Project', '');
@@ -992,6 +1002,11 @@ const invalidCases: Record<string, InvalidCase[]> = {
     ['system:open-path', 'an empty path', ['']],
     ['system:copy-text', 'oversized text', [long(2_000_001)]],
     ['system:copy-image', 'a remote image', ['https://example.com/image.png']],
+    ...malformedPngDataUrls.map(([label, dataUrl]): InvalidCase => [
+      'system:copy-image',
+      `a data URL with ${label}`,
+      [dataUrl],
+    ]),
     ['system:copy-context', 'an unknown field', [{ markdown: 'a', imageDataUrl: pngDataUrl, path: anyPath }]],
     [
       'onboarding:prepare-handoff',
@@ -1066,6 +1081,11 @@ const invalidCases: Record<string, InvalidCase[]> = {
     ],
     ['workflow:prompt-export:write', 'bundle number zero', [{ sessionId, bundleNumber: 0, markdown: 'a' }]],
     ['workflow:prompt-export:write', 'empty markdown', [{ sessionId, bundleNumber: 1, markdown: '' }]],
+    ...malformedPngDataUrls.map(([label, pngDataUrl]): InvalidCase => [
+      'workflow:prompt-export:write',
+      `a PNG data URL with ${label}`,
+      [{ sessionId, bundleNumber: 1, pngDataUrl, markdown: 'a' }],
+    ]),
     ...withNames('workflow:prompt-export:write', 'source filename', (name) => [
       { sessionId, bundleNumber: 1, markdown: 'a', sourceAssets: [{ filename: name, source: '{}' }] },
     ]).filter(([, label]) => !/trailing|nul/.test(label)),

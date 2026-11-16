@@ -8,6 +8,7 @@ import {
   settingsPatchSchema,
 } from '../src/shared/schema.js';
 import { MAX_CLIPBOARD_PNG_LENGTH } from '../src/shared/clipboard-context.js';
+import { isPngDataUrl } from './png-data-url.js';
 import {
   createBackupInputSchema,
   inspectBackupInputSchema,
@@ -29,7 +30,7 @@ export const screenshotInput = z.object({ projectPath: pathInput, screenshot: sc
 export const png = z
   .string()
   .max(100_000_000)
-  .regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/);
+  .refine(isPngDataUrl, { message: 'Expected a base64 PNG data URL.' });
 export const contentImage = z
   .object({
     filename: filenameSchema,

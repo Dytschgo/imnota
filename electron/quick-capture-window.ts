@@ -10,6 +10,7 @@ import type {
 } from '../src/shared/quick-capture.js';
 import { annotationSchema } from '../src/shared/schema.js';
 import { MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS } from '../src/shared/capture.js';
+import { pngDimensionsWithin, readPngHeader } from '../src/shared/png.js';
 import { QuickCaptureStore, type PendingQuickCapture } from './quick-capture-store.js';
 import { nativeClipboard } from './native-clipboard.js';
 import { NativeWorkflowError, workflowOutcome } from './workflow-errors.js';
@@ -39,20 +40,14 @@ function decodePng(png: Buffer) {
   if (!png.length || png.length > 100_000_000)
     throw new Error('The capture PNG is too large. Previous pixels are kept.');
   // Bound decoding from the PNG's own dimensions before allocating a native bitmap.
+  const header = readPngHeader(png);
+  if (!header) throw new Error('The capture is not a PNG. Previous pixels are kept.');
+  const { width: declaredWidth, height: declaredHeight } = header;
   if (
-    png.length < 33 ||
-    !png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ||
-    png.toString('ascii', 12, 16) !== 'IHDR'
-  )
-    throw new Error('The capture is not a PNG. Previous pixels are kept.');
-  const declaredWidth = png.readUInt32BE(16),
-    declaredHeight = png.readUInt32BE(20);
-  if (
-    !declaredWidth ||
-    !declaredHeight ||
-    declaredWidth > MAX_CAPTURE_DIMENSION ||
-    declaredHeight > MAX_CAPTURE_DIMENSION ||
-    declaredWidth * declaredHeight > MAX_CAPTURE_PIXELS
+    !pngDimensionsWithin(declaredWidth, declaredHeight, {
+      maxEdge: MAX_CAPTURE_DIMENSION,
+      maxPixels: MAX_CAPTURE_PIXELS,
+    })
   )
     throw new Error('The capture PNG dimensions exceed safe limits. Previous pixels are kept.');
   const image = nativeImage.createFromBuffer(png);

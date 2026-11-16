@@ -11,6 +11,14 @@ import type {
 } from '../src/shared/content-items.js';
 import type { ImagePayload, ProjectData, ProjectSnapshot } from '../src/shared/types.js';
 import { filenameSchema, validateProject } from '../src/shared/schema.js';
+import {
+  crc32,
+  PNG_SIGNATURE,
+  validatePng,
+  type PngValidationFailure,
+  type PngValidationPolicy,
+} from '../src/shared/png.js';
+import { decodePngDataUrl } from './png-data-url.js';
 import { assertNoLinks, atomicWrite, isWithin } from './files.js';
 import {
   screenshotTransactionBaseline,
@@ -42,7 +50,6 @@ const MAX_MARKDOWN_BYTES = 2_000_000;
 const MAX_DRAWING_SOURCE_BYTES = 20_000_000;
 const MAX_DRAWING_PNG_BYTES = 100_000_000;
 const MAX_DRAWING_PIXELS = 40_000_000;
-const PNG_DATA_URL = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/;
 
 export const EMPTY_EXCALIDRAW_SOURCE = JSON.stringify(
   {
@@ -56,15 +63,6 @@ export const EMPTY_EXCALIDRAW_SOURCE = JSON.stringify(
   null,
   2,
 );
-
-function crc32(value: Uint8Array): number {
-  let crc = 0xffffffff;
-  for (const byte of value) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
 
 function pngChunk(type: string, data: Uint8Array): Buffer {
   const typeBytes = Buffer.from(type, 'ascii');
@@ -86,7 +84,7 @@ function whitePng(width: number, height: number): Buffer {
   const pixels = Buffer.alloc((rowBytes + 1) * height, 255);
   for (let row = 0; row < height; row++) pixels[row * (rowBytes + 1)] = 0;
   return Buffer.concat([
-    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    Buffer.from(PNG_SIGNATURE),
     pngChunk('IHDR', ihdr),
     pngChunk('IDAT', deflateSync(pixels)),
     pngChunk('IEND', Buffer.alloc(0)),
@@ -166,62 +164,52 @@ async function readRequiredBounded(target: string, maximum: number): Promise<Buf
   return value;
 }
 
-function pngDimensions(value: Uint8Array): { width: number; height: number } {
-  const buffer = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
-  if (
-    buffer.byteLength < 33 ||
-    !buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ||
-    buffer.readUInt32BE(8) !== 13 ||
-    buffer.toString('ascii', 12, 16) !== 'IHDR'
-  )
-    throw new Error('Drawing image is not a valid PNG.');
-  const width = buffer.readUInt32BE(16);
-  const height = buffer.readUInt32BE(20);
-  if (!width || !height || width > 16_384 || height > 16_384 || width * height > MAX_DRAWING_PIXELS)
-    throw new Error('Drawing image dimensions are outside supported limits.');
-  if (
-    buffer[24] !== 8 ||
-    ![0, 2, 3, 4, 6].includes(buffer[25]) ||
-    buffer[26] !== 0 ||
-    buffer[27] !== 0 ||
-    ![0, 1].includes(buffer[28])
-  )
-    throw new Error('Drawing PNG uses unsupported encoding.');
-  let offset = 8;
-  let chunks = 0;
-  let sawIdat = false;
-  let sawIend = false;
-  while (offset < buffer.byteLength) {
-    if (offset + 12 > buffer.byteLength) throw new Error('Drawing PNG is truncated.');
-    const length = buffer.readUInt32BE(offset);
-    const end = offset + 12 + length;
-    if (!Number.isSafeInteger(end) || end > buffer.byteLength)
-      throw new Error('Drawing PNG contains a truncated chunk.');
-    const type = buffer.toString('ascii', offset + 4, offset + 8);
-    const expectedCrc = buffer.readUInt32BE(offset + 8 + length);
-    const actualCrc = crc32(buffer.subarray(offset + 4, offset + 8 + length));
-    if (actualCrc !== expectedCrc) throw new Error(`Drawing PNG ${type} chunk failed CRC validation.`);
-    chunks += 1;
-    if (chunks > 10_000) throw new Error('Drawing PNG contains too many chunks.');
-    if (type === 'IDAT') sawIdat = true;
-    if (type === 'IEND') {
-      if (length !== 0 || end !== buffer.byteLength) throw new Error('Drawing PNG has an invalid ending.');
-      sawIend = true;
-    }
-    offset = end;
+const DRAWING_PNG_POLICY: PngValidationPolicy = {
+  maxEdge: 16_384,
+  maxPixels: MAX_DRAWING_PIXELS,
+  allowedColorTypes: [0, 2, 3, 4, 6],
+  maxChunks: 10_000,
+};
+
+function drawingPngMessage(failure: PngValidationFailure): string {
+  switch (failure.reason) {
+    case 'dimensions':
+      return 'Drawing image dimensions are outside supported limits.';
+    case 'encoding':
+      return 'Drawing PNG uses unsupported encoding.';
+    case 'truncated':
+      return 'Drawing PNG is truncated.';
+    case 'truncated-chunk':
+      return 'Drawing PNG contains a truncated chunk.';
+    case 'crc':
+      return `Drawing PNG ${failure.chunkType} chunk failed CRC validation.`;
+    case 'too-many-chunks':
+      return 'Drawing PNG contains too many chunks.';
+    case 'end-before-data':
+      return failure.trailing ? 'Drawing PNG has an invalid ending.' : 'Drawing PNG is incomplete.';
+    case 'end-not-empty':
+    case 'trailing-data':
+      return 'Drawing PNG has an invalid ending.';
+    case 'incomplete':
+      return 'Drawing PNG is incomplete.';
+    default:
+      return 'Drawing image is not a valid PNG.';
   }
-  if (!sawIdat || !sawIend) throw new Error('Drawing PNG is incomplete.');
-  return { width, height };
+}
+
+export function drawingPngDimensions(value: Uint8Array): { width: number; height: number } {
+  const result = validatePng(value, DRAWING_PNG_POLICY);
+  if (!result.ok) throw new Error(drawingPngMessage(result));
+  return { width: result.header.width, height: result.header.height };
 }
 
 function parsePngPayload(image: ImagePayload, expectedFilename: string): Buffer {
   filenameSchema.parse(image.filename);
   if (image.filename !== expectedFilename) throw new Error('Drawing image filename does not match its item.');
-  const match = PNG_DATA_URL.exec(image.dataUrl);
-  if (!match) throw new Error('Drawing image must be a base64 PNG data URL.');
-  const value = Buffer.from(match[1], 'base64');
+  const value = decodePngDataUrl(image.dataUrl);
+  if (!value) throw new Error('Drawing image must be a base64 PNG data URL.');
   if (value.byteLength > MAX_DRAWING_PNG_BYTES) throw new Error('Drawing PNG is too large.');
-  const dimensions = pngDimensions(value);
+  const dimensions = drawingPngDimensions(value);
   if (image.width !== dimensions.width || image.height !== dimensions.height)
     throw new Error('Drawing image dimensions do not match the PNG bytes.');
   return value;
@@ -577,7 +565,7 @@ export class ContentPersistenceService {
         readRequiredBounded(resolveContentPath(projectPath, paths.image!), MAX_DRAWING_PNG_BYTES),
       ]);
       validateDrawingSource(source.toString('utf8'));
-      const dimensions = pngDimensions(image);
+      const dimensions = drawingPngDimensions(image);
       this.dependencies.validatePng?.(image, dimensions);
       if (dimensions.width !== item.originalWidth || dimensions.height !== item.originalHeight)
         throw new Error('Drawing PNG dimensions do not match project metadata.');
