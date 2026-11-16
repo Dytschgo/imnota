@@ -1,6 +1,7 @@
 import { filenameSchema } from '../src/shared/schema.js';
 import {
   pathInput,
+  pngDataUrlInput,
   workflowBundleNumber,
   workflowManifest,
   workflowSessionId,
@@ -86,11 +87,7 @@ export function registerPromptExportIpc(router: IpcRouter, host: IpcHost): void 
             .object({
               sessionId: workflowSessionId,
               bundleNumber: workflowBundleNumber,
-              pngDataUrl: z
-                .string()
-                .max(134_000_000)
-                .regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/)
-                .optional(),
+              pngDataUrl: pngDataUrlInput(134_000_000).optional(),
               markdown: z.string().min(1).max(2_000_000),
               sourceAssets: z
                 .array(

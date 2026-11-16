@@ -23,12 +23,10 @@ import {
   type StoredPromptBundle,
 } from './prompt-bundle-store.js';
 import { clipboardFailure, filesystemFailure, NativeWorkflowError } from './workflow-errors.js';
+import { decodePngDataUrl, maxPngDataUrlLength, PNG_DATA_URL_PREFIX } from './png-data-url.js';
 import { formatTerminalHandoff, TerminalPathError } from '../src/shared/terminal-handoff.js';
 
-const PNG_DATA_URL_PREFIX = 'data:image/png;base64,';
-const MAX_PNG_DATA_URL_CHARACTERS =
-  PNG_DATA_URL_PREFIX.length + Math.ceil(MAX_PROMPT_BUNDLE_PNG_BYTES / 3) * 4;
-const PNG_DATA_URL = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/;
+const MAX_PNG_DATA_URL_CHARACTERS = maxPngDataUrlLength(MAX_PROMPT_BUNDLE_PNG_BYTES);
 /** Finalized sessions whose read/copy grants stay available, oldest finalization evicted first. */
 export const DEFAULT_MAX_FINALIZED_GRANTS = 128;
 
@@ -106,12 +104,12 @@ function publicFinalized(result: FinalizedPromptBundleSession): PromptExportFina
   };
 }
 
-function decodePngDataUrl(dataUrl: string): Uint8Array {
+function promptPngFromDataUrl(dataUrl: string): Uint8Array {
   if (typeof dataUrl !== 'string' || dataUrl.length > MAX_PNG_DATA_URL_CHARACTERS)
     throw new NativeWorkflowError('invalid-input', 'Prompt PNG is empty or too large.');
-  const match = PNG_DATA_URL.exec(dataUrl);
-  if (!match) throw new NativeWorkflowError('invalid-input', 'Prompt image must be a PNG data URL.');
-  return Buffer.from(match[1], 'base64');
+  const png = decodePngDataUrl(dataUrl, MAX_PNG_DATA_URL_CHARACTERS);
+  if (!png) throw new NativeWorkflowError('invalid-input', 'Prompt image must be a PNG data URL.');
+  return png;
 }
 
 async function readBoundedRegularFile(
@@ -198,7 +196,7 @@ export class PromptBundleWorkflow {
       await this.store.commitBundle({
         sessionId,
         bundleNumber,
-        png: pngDataUrl === undefined ? undefined : decodePngDataUrl(pngDataUrl),
+        png: pngDataUrl === undefined ? undefined : promptPngFromDataUrl(pngDataUrl),
         markdown,
         sourceAssets,
       }),

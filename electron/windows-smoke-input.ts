@@ -1,4 +1,4 @@
-import { createRequire } from 'node:module';
+import { loadKoffi } from './koffi.js';
 
 const INPUT_KEYBOARD = 1;
 const KEYEVENTF_KEYUP = 0x0002;
@@ -8,14 +8,6 @@ const VK_SHIFT = 0x10;
 const VK_F9 = 0x78;
 
 export const WINDOWS_SMOKE_CAPTURE_SHORTCUT = 'Ctrl+Alt+Shift+F9';
-
-interface KoffiLibrary {
-  func(name: string, result: string, parameters: readonly string[]): (...args: unknown[]) => unknown;
-}
-
-interface KoffiModule {
-  load(name: string): KoffiLibrary;
-}
 
 export interface WindowsSendInputApi {
   sendInput(count: number, inputs: Buffer, inputSize: number): number;
@@ -34,7 +26,7 @@ export function createWindowsSmokePointer(api?: WindowsSmokePointerApi): {
 } {
   if (!api) {
     const sendInputApi = loadWindowsSendInputApi();
-    const user32 = loadKoffi().load('user32.dll');
+    const user32 = loadKoffi('Windows native smoke input').load('user32.dll');
     const setCursorPos = user32.func('SetCursorPos', 'int', ['int', 'int']);
     api = {
       ...sendInputApi,
@@ -74,21 +66,10 @@ export interface WindowsKeyboardInputs {
   inputSize: number;
 }
 
-function loadKoffi(): KoffiModule {
-  const packageName =
-    process.arch === 'x64'
-      ? '@koromix/koffi-win32-x64'
-      : process.arch === 'arm64'
-        ? '@koromix/koffi-win32-arm64'
-        : undefined;
-  if (!packageName) throw new Error(`Windows native smoke input is unavailable on ${process.arch}.`);
-  return createRequire(import.meta.url)(packageName) as KoffiModule;
-}
-
 function loadWindowsSendInputApi(): WindowsSendInputApi {
   if (process.platform !== 'win32')
     throw new Error('Windows native smoke input is available only on Windows.');
-  const koffi = loadKoffi();
+  const koffi = loadKoffi('Windows native smoke input');
   const user32 = koffi.load('user32.dll');
   const kernel32 = koffi.load('kernel32.dll');
   const SendInput = user32.func('SendInput', 'uint32_t', ['uint32_t', 'void *', 'int']);
