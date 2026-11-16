@@ -1,4 +1,4 @@
-import { BrowserWindow, nativeImage, screen, type Display } from 'electron';
+import { BrowserWindow, nativeImage, screen, type Display, type NativeImage } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ProjectData } from '../src/shared/types.js';
@@ -12,6 +12,7 @@ import {
 import { screenshotPath } from './collections.js';
 import type { CaptureWindowCandidate } from './capture-windows.js';
 import { withSourceWindowFixture } from './source-window-fixture.js';
+import { chooseWindowsPromptCopyFunction } from './mixed-content-smoke.js';
 import { NativeUiDriver, type SmokeCapture } from './smoke-native-driver.js';
 import {
   createWindowsSmokePointer,
@@ -49,43 +50,14 @@ export interface CaptureSmokeResult {
 
 const delay = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
-async function promptExportSets(exportsDirectory: string): Promise<string[]> {
-  const entries = await fs.readdir(exportsDirectory, { withFileTypes: true }).catch(() => []);
-  return entries
-    .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
-    .map((entry) => entry.name);
-}
-
-/**
- * Waits for the newly published prompt set and returns every bundle PNG in it. Sets are staged
- * in a hidden directory and published whole, so a visible set already holds all of its bundles.
- */
-async function waitForExportedPromptPngs(
-  exportsDirectory: string,
-  previousSets: ReadonlySet<string>,
-): Promise<Buffer[]> {
-  const deadline = Date.now() + 30_000;
-  do {
-    for (const name of await promptExportSets(exportsDirectory)) {
-      if (previousSets.has(name)) continue;
-      const files = await fs.readdir(path.join(exportsDirectory, name));
-      const pngs = files.filter(
-        (file) => / - d+.png$/.test(file) && files.includes(file.replace(/.png$/, '.md')),
-      );
-      if (pngs.length)
-        return Promise.all(pngs.map((file) => fs.readFile(path.join(exportsDirectory, name, file))));
-    }
-    await delay(50);
-  } while (Date.now() < deadline);
-  throw new Error('Synthetic capture prompt bundle export did not publish a Markdown/PNG pair.');
-}
-
 /**
  * Counts pixels matching any synthetic display color and pixels of the default red annotation
  * stroke (#ef4444). Interior pixels survive bundle scaling; edges blend, hence the tolerances.
  */
-function capturedExportPixels(png: Buffer, displayCount: number): { capture: number; annotation: number } {
-  const image = nativeImage.createFromBuffer(png);
+function capturedExportPixels(
+  image: NativeImage,
+  displayCount: number,
+): { capture: number; annotation: number } {
   if (image.isEmpty()) return { capture: 0, annotation: 0 };
   const colors = Array.from({ length: displayCount }, (_, index) => syntheticCaptureColor(index));
   const bitmap = image.toBitmap();
@@ -846,17 +818,17 @@ export async function exerciseRegionCapture(
   if (artifactDirectory)
     artifacts.push(await driver.capture(artifactDirectory, 'capture-annotation-synthetic.png', captured));
 
-  // Export the annotated capture through the prompt bundle dialog the UI offers.
-  const exportsDirectory = path.join(projectPath, 'collections', captured.collectionId, 'exports');
-  const setsBeforeExport = new Set(await promptExportSets(exportsDirectory));
+  // Export the annotated capture through the prompt bundle dialog the UI offers and check the
+  // copied bundle image. Windows defaults to Copy files, so use Rich copy there and restore it.
   const promptDialog = '[data-testid="prompt-sharing-dialog"][aria-busy="false"]';
   await driver.click({ selector: '[data-testid="share-prompt-bundles"]' });
   await driver.waitFor(
     { selector: `${promptDialog} [data-testid="copy-bundle-1"]:not(:disabled)` },
     { timeoutMs: 30_000 },
   );
+  await chooseWindowsPromptCopyFunction(driver, 'rich');
   // The capture is the newest item, so copy the last bundle; the pixel check below fails loudly
-  // if the capture is not in the published set.
+  // if the capture is not in it.
   const lastBundle = await driver.evaluate<number>(
     `Math.max(...[...document.querySelectorAll('[data-testid="prompt-sharing-dialog"] [data-testid^="copy-bundle-"]')].map(element => /^copy-bundle-([0-9]+)$/.exec(element.getAttribute('data-testid'))?.[1]).filter(Boolean).map(Number))`,
   );
@@ -867,14 +839,14 @@ export async function exerciseRegionCapture(
     { selector: `${promptDialog} [data-testid="copy-bundle-${lastBundle}"].is-copied` },
     { timeoutMs: 30_000 },
   );
+  const copiedBundle = await nativeClipboard.readImage();
+  await chooseWindowsPromptCopyFunction(driver, 'files');
   await driver.click({ selector: '[data-testid="prompt-sharing-close"]' });
   await driver.waitFor({ selector: '[data-testid="prompt-sharing-dialog"]' }, { absent: true });
-  const exportedPngs = await waitForExportedPromptPngs(exportsDirectory, setsBeforeExport);
-  const displayCount = screen.getAllDisplays().length;
-  const observed = exportedPngs.map((png) => capturedExportPixels(png, displayCount));
-  if (!observed.some((pixels) => pixels.capture >= 500 && pixels.annotation >= 20))
+  const observed = capturedExportPixels(copiedBundle, screen.getAllDisplays().length);
+  if (observed.capture < 500 || observed.annotation < 20)
     throw new Error(
-      `Prompt bundle export lacks the synthetic capture or its rectangle annotation: ${JSON.stringify(observed)}.`,
+      `Copied prompt bundle lacks the synthetic capture or its rectangle annotation: ${JSON.stringify(observed)}.`,
     );
 
   overlay = await startCapture(driver);

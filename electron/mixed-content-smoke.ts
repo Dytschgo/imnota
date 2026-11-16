@@ -7,7 +7,7 @@ import { nativeClipboard } from './native-clipboard.js';
 import type { NativeUiDriver, SmokeCapture } from './smoke-native-driver.js';
 import type { SmokeWorkflowHost } from './smoke-workflow.js';
 
-async function chooseWindowsPromptCopyFunction(
+export async function chooseWindowsPromptCopyFunction(
   driver: NativeUiDriver,
   variant: 'files' | 'rich',
 ): Promise<void> {
@@ -27,7 +27,7 @@ async function chooseWindowsPromptCopyFunction(
       const result = await window.imnota.getPreferenceSettings();
       if (primary === ${JSON.stringify(label)} && result.ok && result.value.settings.nativeCopy.defaultFunction === ${JSON.stringify(variant)})
         return resolve(true);
-      if (Date.now() - started > 10000) return reject(new Error('Mixed-content copy function was not persisted.'));
+      if (Date.now() - started > 10000) return reject(new Error('Prompt copy function was not persisted.'));
       setTimeout(check, 50);
     };
     check();
