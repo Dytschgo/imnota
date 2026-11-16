@@ -209,7 +209,7 @@ it(
     ).rejects.toMatchObject({ code: 'network-failure' });
 
     const recovered = await client.list();
-    expect(recovered.recoveryErrors).toEqual([]);
+    expect(recovered.recoveryWarnings).toEqual([]);
     expect(recovered.records.map((record) => record.title)).toEqual([
       'Recovered contract prompt',
       'Real contract prompt',

@@ -477,7 +477,6 @@ export class HostedShareClient {
     }
     return {
       records: (await this.read()).map(publicRecord),
-      recoveryErrors: visibleWarnings.map((warning) => warning.message),
       recoveryWarnings: visibleWarnings,
     };
   }

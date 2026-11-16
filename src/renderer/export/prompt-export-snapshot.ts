@@ -21,6 +21,7 @@ import type { SavedPromptExportContext } from './prompt-export-controller-core';
  */
 export const PROMPT_EXPORT_SNAPSHOT_VERSION = 3;
 
+/** OCR is optional metadata: all screenshots in one Copy Bundle share this wait budget. */
 const OCR_EXPORT_BUDGET_MS = 10_000;
 
 export interface PromptExportSnapshotCaptureOptions {

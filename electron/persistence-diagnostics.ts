@@ -319,7 +319,7 @@ export class PersistenceDiagnostics {
 
 /** Exclude clipboard contents, hosted sharing, and per-keystroke read-only queries. */
 export function tracesPersistenceChannel(channel: string): boolean {
-  return /^(projects:(create|load|open-dialog|save|save-screenshot|update-metadata|set-archived|archive|delete|duplicate)|screenshots:|content:|collections:edit|recovery:|backups:|workflow:project-watch:(reload|cas)|workflow:capture:(region|repeat-last-region))/.test(
+  return /^(projects:(create|load|open-dialog|save|save-screenshot|update-metadata|set-archived|delete|duplicate)|screenshots:|content:|collections:edit|backups:|workflow:project-watch:(reload|cas)|workflow:capture:(region|repeat-last-region))/.test(
     channel,
   );
 }

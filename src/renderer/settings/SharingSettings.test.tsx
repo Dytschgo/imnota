@@ -31,7 +31,7 @@ function bridge(overrides: Partial<ImnotaBridge> = {}) {
   const value = {
     listHostedShares: vi.fn(async () => ({
       ok: true as const,
-      value: { records: [], recoveryErrors: [], recoveryWarnings: [] },
+      value: { records: [], recoveryWarnings: [] },
     })),
     dismissHostedShareRecoveryWarning: vi.fn(async () => ({ ok: true as const, value: undefined })),
     revokeHostedShare: vi.fn(async ({ id }: { id: string }) => ({
@@ -107,7 +107,7 @@ describe('SharingSettings', () => {
       })
       .mockResolvedValueOnce({
         ok: true,
-        value: { records: [], recoveryErrors: [], recoveryWarnings: [] },
+        value: { records: [], recoveryWarnings: [] },
       });
     const native = bridge({ listHostedShares });
     render(<SharingSettings />);
@@ -120,7 +120,7 @@ describe('SharingSettings', () => {
     bridge({
       listHostedShares: vi.fn(async () => ({
         ok: true as const,
-        value: { records: [active], recoveryErrors: [], recoveryWarnings: [] },
+        value: { records: [active], recoveryWarnings: [] },
       })),
       copyText: vi.fn(async () => {
         throw new Error('clipboard');
@@ -146,7 +146,7 @@ describe('SharingSettings', () => {
     const native = bridge({
       listHostedShares: vi.fn(async () => ({
         ok: true as const,
-        value: { records: [active, expired, revoked], recoveryErrors: [], recoveryWarnings: [] },
+        value: { records: [active, expired, revoked], recoveryWarnings: [] },
       })),
       revokeHostedShare,
     });
@@ -180,7 +180,7 @@ describe('SharingSettings', () => {
       .fn<ImnotaBridge['listHostedShares']>()
       .mockResolvedValueOnce({
         ok: true,
-        value: { records: [active], recoveryErrors: [warning.message], recoveryWarnings: [warning] },
+        value: { records: [active], recoveryWarnings: [warning] },
       })
       .mockImplementationOnce(
         () =>
@@ -198,7 +198,7 @@ describe('SharingSettings', () => {
     await waitFor(() => expect(screen.queryByText(warning.message)).not.toBeInTheDocument());
     finishRefresh({
       ok: true,
-      value: { records: [active], recoveryErrors: [warning.message], recoveryWarnings: [warning] },
+      value: { records: [active], recoveryWarnings: [warning] },
     });
     await Promise.resolve();
     expect(screen.queryByText(warning.message)).not.toBeInTheDocument();
@@ -211,7 +211,7 @@ describe('SharingSettings', () => {
       .fn<ImnotaBridge['listHostedShares']>()
       .mockResolvedValueOnce({
         ok: true,
-        value: { records: [active], recoveryErrors: [], recoveryWarnings: [] },
+        value: { records: [active], recoveryWarnings: [] },
       })
       .mockImplementationOnce(
         () =>
@@ -232,7 +232,7 @@ describe('SharingSettings', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled());
     finishRefresh({
       ok: true,
-      value: { records: [active], recoveryErrors: [], recoveryWarnings: [] },
+      value: { records: [active], recoveryWarnings: [] },
     });
     await Promise.resolve();
     expect(screen.getByText('revoked')).toBeInTheDocument();
