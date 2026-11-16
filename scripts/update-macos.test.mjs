@@ -1549,6 +1549,7 @@ bundle() {
   binary "$app/Contents/Resources/imnota-security-observer" "$helper"
   binary "$app/Contents/Frameworks/Imnota Helper.app/Contents/MacOS/Imnota Helper" "$helper"
   binary "$app/Contents/Frameworks/Imnota Helper (GPU).app/Contents/MacOS/Imnota Helper (GPU)" "$helper"
+  binary "$app/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework" "$helper"
   printf '%s' "$app"
 }
 expect_refused() { if "$@"; then echo "unexpectedly accepted: $*" >&2; exit 1; fi; }
@@ -1559,6 +1560,12 @@ expect_refused verify_arm64_executables "$(bundle intel x86_64 x86_64)"
 expect_refused verify_arm64_executables "$(bundle intel-helpers arm64 x86_64)"
 app=$(bundle intel-gpu arm64 arm64)
 binary "$app/Contents/Frameworks/Imnota Helper (GPU).app/Contents/MacOS/Imnota Helper (GPU)" x86_64
+expect_refused verify_arm64_executables "$app"
+app=$(bundle intel-framework arm64 arm64)
+binary "$app/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework" x86_64
+expect_refused verify_arm64_executables "$app"
+app=$(bundle missing-framework arm64 arm64)
+rm "$app/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework"
 expect_refused verify_arm64_executables "$app"
 app=$(bundle missing-observer arm64 arm64)
 rm "$app/Contents/Resources/imnota-security-observer"

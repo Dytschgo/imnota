@@ -520,15 +520,20 @@ verify_arm64_binary() {
   /usr/bin/lipo "$1" -verify_arch arm64
 }
 
-# The main executable and every bundled helper must run natively on Apple
-# silicon. A universal build passes; an Intel-only build does not.
+# The main executable, the Electron framework and every bundled helper must run
+# natively on Apple silicon. A universal build passes; an Intel-only build does not.
 verify_arm64_executables() {
   local bundle=$1 executable helper_app helper_name helper_count=0
+  local framework="$bundle/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework"
   for executable in "$bundle/Contents/MacOS/$APP_NAME" "$bundle/Contents/Resources/imnota-capture-helper" \
     "$bundle/Contents/Resources/imnota-security-observer"; do
     [[ -f "$executable" && ! -L "$executable" && -x "$executable" ]] || return 1
     verify_arm64_binary "$executable" || return 1
   done
+  # Every process loads this framework; an Intel-only copy would only fail after
+  # Imnota quits, so refuse it during verification.
+  [[ -f "$framework" && ! -L "$framework" ]] || return 1
+  verify_arm64_binary "$framework" || return 1
   for helper_app in "$bundle/Contents/Frameworks/$APP_NAME Helper"*.app; do
     [[ -d "$helper_app" && ! -L "$helper_app" ]] || return 1
     helper_name="${helper_app##*/}"

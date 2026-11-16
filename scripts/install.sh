@@ -414,8 +414,7 @@ require_supported_macos_archive() {
   elif [ "$universal_count" -eq 1 ]; then
     selected="Imnota-${version}-universal-mac.zip" selected_checksum="$universal_checksum"
   else
-    # Releases and fixtures that list only the alias predate arm64 builds; it is universal.
-    return 0
+    fail "SHA256SUMS.txt for ${release_tag} lists no Imnota-${version} macOS archive. Nothing was installed and no installed app was changed."
   fi
   [ "$alias_checksum" = "$selected_checksum" ] ||
     fail "Imnota-mac.zip is not ${selected} in ${release_tag}. Nothing was installed and no installed app was changed."
