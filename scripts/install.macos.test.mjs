@@ -6,6 +6,7 @@ import test from 'node:test';
 import { setTimeout, clearTimeout } from 'node:timers';
 import { fileURLToPath, URL } from 'node:url';
 import {
+  macChecksums,
   appImage,
   assertNoTemporaryFiles,
   bash,
@@ -25,7 +26,7 @@ import {
 test('macOS refuses to extract or replace the app after a failed verification', { skip: !bash }, (t) => {
   const cases = [
     [
-      { 'Imnota-mac.zip': 'tampered', 'SHA256SUMS.txt': `${checksumLine('Imnota-mac.zip', 'zip')}\n` },
+      { 'Imnota-mac.zip': 'tampered', 'SHA256SUMS.txt': `${macChecksums('zip')}\n` },
       /Checksum mismatch for Imnota-mac\.zip/,
     ],
     [
@@ -36,7 +37,7 @@ test('macOS refuses to extract or replace the app after a failed verification', 
       /does not contain exactly one checksum for Imnota-mac\.zip/,
     ],
     [{ 'Imnota-mac.zip': 'zip' }, /SHA256SUMS\.txt could not be downloaded/],
-    [{ 'SHA256SUMS.txt': `${checksumLine('Imnota-mac.zip', 'zip')}\n` }, /Download failed/],
+    [{ 'SHA256SUMS.txt': `${macChecksums('zip')}\n` }, /Download failed/],
   ];
   for (const [files, message] of cases) {
     const directories = sandbox(t);
@@ -67,7 +68,7 @@ test('macOS extracts the archive only after it is verified', { skip: !bash }, (t
   const directories = sandbox(t);
   publish(directories, 'v1.2.3', {
     'Imnota-mac.zip': 'zip',
-    'SHA256SUMS.txt': `${checksumLine('Imnota-mac.zip', 'zip')}\n`,
+    'SHA256SUMS.txt': `${macChecksums('zip')}\n`,
   });
 
   // The fake ditto fails, so this stops at extraction; real installation is
@@ -83,6 +84,60 @@ test('macOS extracts the archive only after it is verified', { skip: !bash }, (t
   ]);
   assertNoTemporaryFiles(directories);
 });
+
+test('macOS refuses a checksum list that does not identify the Mac archive', { skip: !bash }, (t) => {
+  const alias = checksumLine('Imnota-mac.zip', 'zip');
+  const cases = [
+    [`${alias}\n`, /lists no Imnota-1\.2\.3 macOS archive/],
+    [
+      `${alias}\n${checksumLine('Imnota-1.2.3-universal-mac.zip', 'other')}\n`,
+      /Imnota-mac\.zip is not Imnota-1\.2\.3-universal-mac\.zip/,
+    ],
+    [
+      `${macChecksums('zip')}\n${checksumLine('Imnota-1.2.3-universal-mac.zip', 'zip')}\n`,
+      /lists a macOS archive more than once/,
+    ],
+  ];
+  for (const [checksums, message] of cases) {
+    const directories = sandbox(t);
+    publish(directories, 'v1.2.3', { 'Imnota-mac.zip': 'zip', 'SHA256SUMS.txt': checksums });
+    const result = runShellInstaller(directories, { platform: 'Darwin', tag: 'v1.2.3' });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, message);
+    assert.match(result.stderr, /no installed app was changed/i);
+    assert.equal(requests(directories).includes('ditto'), false);
+    assertNoTemporaryFiles(directories);
+  }
+});
+
+test(
+  'macOS installs an Apple silicon archive only on Apple silicon, including Rosetta',
+  { skip: !bash },
+  (t) => {
+    const arm64Only = `${checksumLine('Imnota-mac.zip', 'zip')}\n${checksumLine('Imnota-1.2.3-arm64-mac.zip', 'zip')}\n`;
+    const refusal = /needs a Mac with Apple silicon\. Intel Macs are no longer supported/;
+    for (const [macHardware, checksums, refused] of [
+      ['intel', arm64Only, true],
+      ['arm64', arm64Only, false],
+      ['rosetta', arm64Only, false],
+      ['intel', `${macChecksums('zip')}\n`, false],
+    ]) {
+      const directories = sandbox(t);
+      publish(directories, 'v1.2.3', { 'Imnota-mac.zip': 'zip', 'SHA256SUMS.txt': checksums });
+      const result = runShellInstaller(directories, { platform: 'Darwin', tag: 'v1.2.3', macHardware });
+      assert.notEqual(result.status, 0);
+      if (refused) {
+        assert.match(result.stderr, refusal);
+        assert.equal(requests(directories).includes('ditto'), false, 'Intel refusal must precede extraction');
+      } else {
+        // The fake ditto fails, so an accepted archive stops at extraction.
+        assert.doesNotMatch(result.stderr, refusal);
+        assert.equal(requests(directories).at(-1), 'ditto', `${macHardware}: ${result.stderr}`);
+      }
+      assertNoTemporaryFiles(directories);
+    }
+  },
+);
 
 function publishMacBundle(directories, { minimum = '10.0.0', executable = true } = {}) {
   const bundle = path.join(directories.root, 'Imnota.app');
@@ -103,7 +158,7 @@ function publishMacBundle(directories, { minimum = '10.0.0', executable = true }
   const bytes = fs.readFileSync(archive);
   publish(directories, 'v1.2.3', {
     'Imnota-mac.zip': bytes,
-    'SHA256SUMS.txt': checksumLine('Imnota-mac.zip', bytes),
+    'SHA256SUMS.txt': macChecksums(bytes),
   });
 }
 
@@ -133,7 +188,7 @@ function publishPortableMacBundle(directories) {
   fs.writeFileSync(path.join(bundle, 'marker'), 'verified bundle');
   publish(directories, 'v1.2.3', {
     'Imnota-mac.zip': 'zip',
-    'SHA256SUMS.txt': checksumLine('Imnota-mac.zip', 'zip'),
+    'SHA256SUMS.txt': macChecksums('zip'),
   });
 }
 
@@ -453,7 +508,7 @@ test(
       if (boundary === 'extraction') {
         publish(directories, 'v1.2.3', {
           'Imnota-mac.zip': 'invalid zip',
-          'SHA256SUMS.txt': checksumLine('Imnota-mac.zip', 'invalid zip'),
+          'SHA256SUMS.txt': macChecksums('invalid zip'),
         });
       } else {
         publishMacBundle(directories, {

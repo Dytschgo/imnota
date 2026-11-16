@@ -199,13 +199,46 @@ validate_release_contract() {
   fi
 
   RELEASE_VERSION="${tag#v}"
-  ARCHIVE_NAME="${APP_NAME}-${RELEASE_VERSION}-universal-mac.zip"
+  ARM64_ARCHIVE_NAME="${APP_NAME}-${RELEASE_VERSION}-arm64-mac.zip"
+  UNIVERSAL_ARCHIVE_NAME="${APP_NAME}-${RELEASE_VERSION}-universal-mac.zip"
   local expected_root="${RELEASE_ROOT}/${tag}"
 
-  [[ "$archive_url" == "${expected_root}/${ARCHIVE_NAME}" ]] ||
+  # Exactly one of the two official archive names; the release's SHA256SUMS.txt
+  # must later agree that this is its preferred macOS archive.
+  if [[ "$archive_url" == "${expected_root}/${ARM64_ARCHIVE_NAME}" ]]; then
+    ARCHIVE_NAME="$ARM64_ARCHIVE_NAME"
+    ARCHIVE_ARCHITECTURE=arm64
+  elif [[ "$archive_url" == "${expected_root}/${UNIVERSAL_ARCHIVE_NAME}" ]]; then
+    ARCHIVE_NAME="$UNIVERSAL_ARCHIVE_NAME"
+    ARCHIVE_ARCHITECTURE=universal
+  else
     die "The archive URL does not exactly match the selected official release."
+  fi
   [[ "$sums_url" == "${expected_root}/SHA256SUMS.txt" ]] ||
     die "The checksum URL does not exactly match the selected official release."
+}
+
+machine_hardware() {
+  /usr/bin/uname -m
+}
+
+sysctl_value() {
+  /usr/sbin/sysctl -n "$1" 2>/dev/null
+}
+
+# Rosetta reports x86_64 from uname, so also ask the kernel about the hardware.
+host_is_apple_silicon() {
+  [[ "$(machine_hardware)" == arm64 ]] && return 0
+  [[ "$(sysctl_value hw.optional.arm64)" == 1 ]] && return 0
+  [[ "$(sysctl_value sysctl.proc_translated)" == 1 ]]
+}
+
+# Universal releases still run on Intel; arm64-only releases do not. Refuse
+# before any download, lock or change to the installed app.
+require_supported_host_architecture() {
+  [[ "$ARCHIVE_ARCHITECTURE" != arm64 ]] && return 0
+  host_is_apple_silicon ||
+    die "Imnota $RELEASE_VERSION needs a Mac with Apple silicon. Intel Macs are no longer supported, so this update cannot be installed here. The installed app was not changed."
 }
 
 validate_app_path() {
@@ -481,13 +514,35 @@ verify_signature() {
   /usr/bin/codesign --verify --deep --strict --all-architectures "$1"
 }
 
-verify_universal_binary() {
+verify_arm64_binary() {
   # Current lipo consumes one arch after -verify_arch and reads a second as
-  # another input file, so verify each architecture in its own call.
-  local arch
-  for arch in x86_64 arm64; do
-    /usr/bin/lipo "$1" -verify_arch "$arch" || return 1
+  # another input file, so pass exactly one architecture and one file.
+  /usr/bin/lipo "$1" -verify_arch arm64
+}
+
+# The main executable, the Electron framework and every bundled helper must run
+# natively on Apple silicon. A universal build passes; an Intel-only build does not.
+verify_arm64_executables() {
+  local bundle=$1 executable helper_app helper_name helper_count=0
+  local framework="$bundle/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework"
+  for executable in "$bundle/Contents/MacOS/$APP_NAME" "$bundle/Contents/Resources/imnota-capture-helper" \
+    "$bundle/Contents/Resources/imnota-security-observer"; do
+    [[ -f "$executable" && ! -L "$executable" && -x "$executable" ]] || return 1
+    verify_arm64_binary "$executable" || return 1
   done
+  # Every process loads this framework; an Intel-only copy would only fail after
+  # Imnota quits, so refuse it during verification.
+  [[ -f "$framework" && ! -L "$framework" ]] || return 1
+  verify_arm64_binary "$framework" || return 1
+  for helper_app in "$bundle/Contents/Frameworks/$APP_NAME Helper"*.app; do
+    [[ -d "$helper_app" && ! -L "$helper_app" ]] || return 1
+    helper_name="${helper_app##*/}"
+    executable="$helper_app/Contents/MacOS/${helper_name%.app}"
+    [[ -f "$executable" && ! -L "$executable" && -x "$executable" ]] || return 1
+    verify_arm64_binary "$executable" || return 1
+    helper_count=$((helper_count + 1))
+  done
+  (( helper_count > 0 ))
 }
 
 extract_archive() {
@@ -703,6 +758,37 @@ wait_for_replacement() {
   return 1
 }
 
+checksum_entry_count() {
+  local sums_file=$1 archive_name=$2 line="" count=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ ^([[:xdigit:]]{64})[[:space:]][[:space:]](.+)$ && "${BASH_REMATCH[2]}" == "$archive_name" ]]; then
+      count=$((count + 1))
+    fi
+  done < "$sums_file"
+  printf '%s\n' "$count"
+}
+
+# Same rule as the app: prefer the arm64 archive when SHA256SUMS.txt lists it,
+# otherwise the universal archive. Never pick between duplicate entries.
+require_selected_archive() {
+  local sums_file=$1 arm64_count universal_count selected
+  arm64_count="$(checksum_entry_count "$sums_file" "$ARM64_ARCHIVE_NAME")" ||
+    die "SHA256SUMS.txt could not be read."
+  universal_count="$(checksum_entry_count "$sums_file" "$UNIVERSAL_ARCHIVE_NAME")" ||
+    die "SHA256SUMS.txt could not be read."
+  (( arm64_count <= 1 )) || die "SHA256SUMS.txt must contain exactly one checksum for $ARM64_ARCHIVE_NAME."
+  (( universal_count <= 1 )) || die "SHA256SUMS.txt must contain exactly one checksum for $UNIVERSAL_ARCHIVE_NAME."
+  if (( arm64_count == 1 )); then
+    selected="$ARM64_ARCHIVE_NAME"
+  elif (( universal_count == 1 )); then
+    selected="$UNIVERSAL_ARCHIVE_NAME"
+  else
+    die "SHA256SUMS.txt lists no macOS archive for Imnota $RELEASE_VERSION."
+  fi
+  [[ "$selected" == "$ARCHIVE_NAME" ]] ||
+    die "The requested $ARCHIVE_NAME is not the macOS archive this release's SHA256SUMS.txt selects ($selected). Check for updates again."
+}
+
 read_expected_checksum() {
   local sums_file=$1
   local archive_name=$2
@@ -817,7 +903,7 @@ validate_extracted_bundle() {
 
   validate_bundle_symlinks "$new_app" "$stage_dir/symlinks.bin"
   verify_signature "$new_app" || die "The downloaded app failed code-signature verification."
-  verify_universal_binary "$new_app/Contents/MacOS/$APP_NAME" || die "The downloaded app is not a universal Intel and Apple silicon build."
+  verify_arm64_executables "$new_app" || die "The downloaded app or one of its helpers does not run natively on Apple silicon."
   require_compatible_macos "$new_app"
 }
 
@@ -936,6 +1022,7 @@ main() {
   require_macos
   local tag=$1 archive_url=$2 sums_url=$3 supplied_app_path=$4 expected_current_version=$5
   validate_release_contract "$tag" "$archive_url" "$sums_url"
+  require_supported_host_architecture
   validate_app_path "$supplied_app_path" "$expected_current_version"
 
   local app_parent="${app_path%/*}"
@@ -955,6 +1042,7 @@ main() {
 
   printf 'Downloading Imnota %s...\n' "$RELEASE_VERSION"
   download_file "$sums_url" "$sums" || die "SHA256SUMS.txt could not be downloaded."
+  require_selected_archive "$sums"
   (( in_app == 0 )) || printf 'IMNOTA_UPDATE archive\n'
   download_file "$archive_url" "$archive" || die "The Imnota update could not be downloaded."
 
