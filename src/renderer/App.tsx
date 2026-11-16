@@ -83,7 +83,7 @@ import {
 } from './capture/capture-destination';
 import type { WhatsNewAction } from './components/WhatsNew';
 import { findWhatsNewRelease, shouldShowWhatsNew } from '../shared/whats-new';
-import { splitDiagnosticReference, userFacingErrorMessage } from './user-facing-error';
+import { reasonMessage, splitDiagnosticReference, userFacingErrorMessage } from './user-facing-error';
 
 export { CollectionControls } from './collection/CollectionRail';
 
@@ -145,6 +145,8 @@ export default function App() {
   const [editProjectRevision, setEditProjectRevision] = useState<string | null>(null);
   const [dialogBusy, setDialogBusy] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<ProjectListItem | null>(null);
+  const [duplicatingProjectPath, setDuplicatingProjectPath] = useState<string | null>(null);
+  const duplicateInFlight = useRef(false);
   const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion | null>(null);
   const [tool, setTool] = useState<ToolChoice>('select');
   const lastAnnotateTool = useRef<ToolChoice>('arrow');
@@ -1518,6 +1520,55 @@ export default function App() {
       pushNavigationLocation(replaceNavigationLocation(stack, previousLocation), currentLocation()),
     );
   }
+  /** Copies a project through the hardened backend, then opens the copy like a new project. */
+  async function duplicateProject(projectPath: string) {
+    // The ref blocks a second click before React re-renders the disabled button.
+    if (duplicateInFlight.current) return;
+    duplicateInFlight.current = true;
+    setDuplicatingProjectPath(projectPath);
+    const previousLocation = currentLocation();
+    let duplicated = false;
+    let duplicateFailure: string | undefined;
+    try {
+      const opened = await guardedSnapshot(async () => {
+        try {
+          const copy = await window.imnota.duplicateProject(projectPath);
+          duplicated = true;
+          return copy;
+        } catch (reason) {
+          duplicateFailure = reasonMessage(reason, 'Duplicating the project');
+          throw reason;
+        }
+      }, 'Duplicating the project');
+      // guardedSnapshot drops errors after newer navigation, but a failed copy can name a
+      // retained incomplete folder, so always surface it.
+      if (duplicateFailure !== undefined) {
+        setError(duplicateFailure);
+        return;
+      }
+      if (!duplicated) return;
+      // Record the opened copy before the refresh await, so later navigation cannot be
+      // overwritten by this history update.
+      if (opened) {
+        clearSearchSelection();
+        setNavigationStack((stack) =>
+          pushNavigationLocation(replaceNavigationLocation(stack, previousLocation), currentLocation()),
+        );
+      }
+      // The copy exists even if newer navigation or adoption prevented opening it.
+      try {
+        await refreshProjects();
+      } catch (reason) {
+        setError(
+          `The project was duplicated, but the project list could not be refreshed: ${reasonMessage(reason, 'Try again.')}`,
+        );
+      }
+      showToast('Project duplicated');
+    } finally {
+      duplicateInFlight.current = false;
+      setDuplicatingProjectPath(null);
+    }
+  }
   async function openProjectDialog() {
     const previousLocation = currentLocation();
     clearSearchSelection();
@@ -2422,6 +2473,8 @@ export default function App() {
             onEdit={beginProjectEdit}
             onArchive={(path) => void setProjectArchived(path, true)}
             onRestore={(path) => void setProjectArchived(path, false)}
+            onDuplicate={(path) => void duplicateProject(path)}
+            duplicatingProjectPath={duplicatingProjectPath}
             onDelete={requestProjectDeletion}
             onSearch={openProjectSearch}
             onBrowseProjects={() => navigate('projects')}
