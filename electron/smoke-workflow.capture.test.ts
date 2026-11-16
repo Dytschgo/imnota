@@ -192,6 +192,7 @@ const canvasFreeByModule = new Map<string, Set<string>>([
       'next-history-light.png', // Backups & history settings.
       'next-history-detail-light.png', // Selected snapshot in settings.
       'next-search-light.png', // Project library search.
+      'next-library-light.png', // Project library rows and their actions.
       'next-templates-light.png', // New-project dialog over the library.
       'next-clipboard-light.png', // Sharing dialog over a Markdown template.
     ]),
@@ -208,6 +209,7 @@ const canvasFreeByModule = new Map<string, Set<string>>([
       'feedback-search-archive-no-match.png', // Archive scope after the no-match action.
       'feedback-projects.png', // Project library.
       'feedback-archived-collections.png', // Archived collection rows in the project library.
+      'feedback-project-duplicated.png', // Project library with the duplicated copy.
       'feedback-project-delete-confirm.png', // Confirmation dialog over the library.
       'workspace-local-diagnostics.png', // Workspace settings.
       'agent-access-setup-prompt.png', // Features settings.
