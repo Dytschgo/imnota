@@ -1,36 +1,26 @@
-import DOMPurify from 'dompurify';
-import { marked } from 'marked';
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import './content-editors.css';
 
-function markdownHtml(value: string): string {
-  return DOMPurify.sanitize(marked.parse(value, { async: false, breaks: true, gfm: true }), {
-    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.:-]|$))/i,
-    FORBID_ATTR: ['srcset', 'style'],
-    FORBID_TAGS: [
-      'audio',
-      'base',
-      'button',
-      'embed',
-      'form',
-      'iframe',
-      'img',
-      'input',
-      'object',
-      'picture',
-      'source',
-      'style',
-      'title',
-      'track',
-      'video',
-    ],
-    USE_PROFILES: { html: true },
-  });
-}
+type PreviewResult = { value: string; html: string } | { value: string; error: true };
 
 export function TextBlockEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const [preview, setPreview] = useState(false);
-  const html = useMemo(() => markdownHtml(value), [value]);
+  const [result, setResult] = useState<PreviewResult | null>(null);
+  useEffect(() => {
+    if (!preview) return;
+    let current = true;
+    void import('./markdown-preview')
+      .then(({ markdownHtml }) => {
+        if (current) setResult({ value, html: markdownHtml(value) });
+      })
+      .catch(() => {
+        if (current) setResult({ value, error: true });
+      });
+    return () => {
+      current = false;
+    };
+  }, [preview, value]);
+  const rendered = result?.value === value ? result : null;
 
   return (
     <section className="text-block-editor" data-content-editor="text" aria-label="Markdown editor">
@@ -56,15 +46,21 @@ export function TextBlockEditor({ value, onChange }: { value: string; onChange: 
         </div>
       </div>
       {preview ? (
-        <article
-          className="markdown-preview"
-          aria-label="Markdown preview"
-          onAuxClick={(event) => event.preventDefault()}
-          onClickCapture={(event) => {
-            if ((event.target as HTMLElement).closest('a')) event.preventDefault();
-          }}
-          dangerouslySetInnerHTML={{ __html: html }}
-        />
+        rendered && 'html' in rendered ? (
+          <article
+            className="markdown-preview"
+            aria-label="Markdown preview"
+            onAuxClick={(event) => event.preventDefault()}
+            onClickCapture={(event) => {
+              if ((event.target as HTMLElement).closest('a')) event.preventDefault();
+            }}
+            dangerouslySetInnerHTML={{ __html: rendered.html }}
+          />
+        ) : (
+          <div className="markdown-preview" role={rendered ? 'alert' : 'status'}>
+            {rendered ? 'Preview is unavailable. Switch to Edit to keep working.' : 'Loading preview…'}
+          </div>
+        )
       ) : (
         <textarea
           className="markdown-input"
