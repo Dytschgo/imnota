@@ -369,6 +369,11 @@ export function useProjectPersistence({
   const callbacks = useRef({ onProject, onSnapshot, onSelectScreenshot });
   callbacks.current = { onProject, onSnapshot, onSelectScreenshot };
   const drafts = useRef(new Map<string, EditorDraft>());
+  const pendingScreenshots = useRef(
+    new Map<string, { projectPath: string; patch: Partial<ScreenshotRecord> }>(),
+  );
+  const loadingScreenshots = useRef(new Map<string, ScreenshotRecord>());
+  const [, publishPendingEdit] = useState(0);
   const inFlight = useRef(new Map<string, Promise<boolean>>());
   const accessCounter = useRef(0);
   const snapshotRef = useRef<ProjectSnapshot | null>(snapshot);
@@ -524,12 +529,24 @@ export function useProjectPersistence({
 
   const hasDirtyDrafts = useCallback(
     (projectPath?: string) =>
+      [...pendingScreenshots.current.values()].some(
+        (item) => !projectPath || item.projectPath === projectPath,
+      ) ||
       [...drafts.current.values()].some(
         (item) =>
           (!projectPath || item.projectPath === projectPath) && item.editRevision !== item.savedRevision,
       ),
     [],
   );
+
+  const discardPendingScreenshots = useCallback((projectPath: string) => {
+    for (const [key, pending] of pendingScreenshots.current) {
+      if (pending.projectPath === projectPath) {
+        pendingScreenshots.current.delete(key);
+        loadingScreenshots.current.delete(key);
+      }
+    }
+  }, []);
 
   const evictCleanDrafts = useCallback(() => {
     const clean = [...drafts.current.values()]
@@ -609,29 +626,37 @@ export function useProjectPersistence({
       return;
     }
     setDraft(null);
+    if (!loadingScreenshots.current.has(activeKey))
+      loadingScreenshots.current.set(activeKey, activeScreenshot);
     void getRendererBridge()
       .loadScreenshotContent({ projectPath: snapshot.projectPath, screenshot: activeScreenshot })
       .then((content) => {
         if (identity !== loadIdentity.current || activeKeyRef.current !== activeKey) return;
+        const pending = pendingScreenshots.current.get(activeKey);
+        const screenshot = { ...activeScreenshot, description: content.description, ...pending?.patch };
         const next: EditorDraft = {
           key: activeKey,
           projectPath: snapshot.projectPath,
-          screenshot: { ...activeScreenshot, description: content.description },
+          screenshot,
           image: content.image,
           annotations: content.annotations,
           contentRevision: content.contentRevision,
-          editRevision: 0,
+          editRevision: pending ? 1 : 0,
           savedRevision: 0,
           lastAccess: ++accessCounter.current,
         };
+        pendingScreenshots.current.delete(activeKey);
+        loadingScreenshots.current.delete(activeKey);
         setCurrentDraft(next);
         setFailedLoadKey(null);
-        setSaveState('saved');
-        if (content.description !== activeScreenshot.description)
+        setSaveState(pending ? 'saving' : 'saved');
+        if (screenshot.description !== activeScreenshot.description)
           callbacks.current.onProject({
-            ...snapshot.project,
-            screenshots: snapshot.project.screenshots.map((item) =>
-              item.id === activeScreenshot.id ? { ...item, description: content.description } : item,
+            ...(snapshotRef.current ?? snapshot).project,
+            screenshots: (snapshotRef.current ?? snapshot).project.screenshots.map((item) =>
+              item.id === activeScreenshot.id
+                ? { ...item, ...pending?.patch, description: screenshot.description }
+                : item,
             ),
           });
       })
@@ -639,12 +664,14 @@ export function useProjectPersistence({
         // A failure for a screenshot the user already left must not surface on the current one.
         if (identity !== loadIdentity.current || activeKeyRef.current !== activeKey) return;
         setFailedLoadKey(activeKey);
+        setSaveState('error');
         setError(workflowMessage(reason, 'The screenshot could not be loaded.'));
       });
   }, [activeKey, activeScreenshot, evictCleanDrafts, loadAttempt, setCurrentDraft, setError, snapshot]);
 
   const saveKey = useCallback(
     (key: string): Promise<boolean> => {
+      if (pendingScreenshots.current.has(key)) return Promise.resolve(false);
       const originalKey = key;
       const existing = inFlight.current.get(key);
       if (existing) return existing;
@@ -811,7 +838,8 @@ export function useProjectPersistence({
       const dirty = [...drafts.current.values()]
         .filter((item) => item.projectPath === projectPath && item.editRevision !== item.savedRevision)
         .map((item) => item.key);
-      if (!dirty.length) return true;
+      if (!dirty.length)
+        return ![...pendingScreenshots.current.values()].some((item) => item.projectPath === projectPath);
       const saved = await Promise.all(dirty.map(saveKey));
       if (saved.some((result) => !result)) return false;
     }
@@ -1147,6 +1175,7 @@ export function useProjectPersistence({
         if (!isCurrent()) return false;
         const projectPath = snapshotRef.current?.projectPath;
         if (projectPath) {
+          discardPendingScreenshots(projectPath);
           for (const [key, retained] of drafts.current) {
             if (retained.projectPath === projectPath) drafts.current.delete(key);
           }
@@ -1193,7 +1222,14 @@ export function useProjectPersistence({
         return false;
       }
     },
-    [flush, hasDirtyDrafts, publishAcceptedRevision, publishExternalChange, setError],
+    [
+      discardPendingScreenshots,
+      flush,
+      hasDirtyDrafts,
+      publishAcceptedRevision,
+      publishExternalChange,
+      setError,
+    ],
   );
 
   const adoptAuthoritativeSnapshot = useCallback(
@@ -1344,7 +1380,24 @@ export function useProjectPersistence({
           : activeKeyRef.current;
       const current = key ? drafts.current.get(key) : undefined;
       if (retainedFixtureDraft && !current) throw new Error('Fixture screenshot was never loaded.');
-      if (!current) return;
+      if (!current) {
+        if (!key || !snapshotRef.current) return;
+        const base = loadingScreenshots.current.get(key) ?? activeScreenshot;
+        if (!base || base.id !== screenshot.id) return;
+        const changedFields = Object.fromEntries(
+          Object.entries(screenshot).filter(
+            ([field, value]) => !sameValue(value, base[field as keyof ScreenshotRecord]),
+          ),
+        ) as Partial<ScreenshotRecord>;
+        const patch = { ...pendingScreenshots.current.get(key)?.patch, ...changedFields };
+        // Compare the next edit with this one, retaining explicit reversions to the
+        // snapshot value even when the description file contains different text.
+        loadingScreenshots.current.set(key, screenshot);
+        pendingScreenshots.current.set(key, { projectPath: snapshotRef.current.projectPath, patch });
+        publishPendingEdit((revision) => revision + 1);
+        setSaveState(failedLoadKey === key ? 'error' : 'saving');
+        return;
+      }
       setCurrentDraft({ ...current, screenshot, editRevision: current.editRevision + 1 });
     },
     queueProjectMetadata,
@@ -1486,6 +1539,7 @@ export function useProjectPersistence({
     },
     adoptAuthoritativeSnapshot,
     discardRestoredProject(projectPath) {
+      discardPendingScreenshots(projectPath);
       ++loadIdentity.current;
       ++ownRevisionGeneration.current;
       for (const [key, retained] of drafts.current)

@@ -253,6 +253,8 @@ Deferred, each with its own gate:
 
 Follow-ups found during delivery:
 
+- **Pending inspector edits (17 November 2026, verification in progress):** screenshot-keyed patches retain edits made before content loads, including single-click edits and explicit reversions. A pending patch counts as unsaved and blocks flush/export/close completion. Successful loading overlays only edited fields over disk content and queues the normal revisioned save. A failed load reports an error and retains the patch in memory for **Retry**; it does not write a replacement for unreadable content. Leaving and returning to the screenshot retains the patch. Explicit discard clears it. These patches are not crash-durable until normal saving succeeds; keep the window open and restore access to the source image before retrying. Independent review and Windows native verification must pass before merge.
+
 - **Data loss, high priority:** an inspector edit made before the active screenshot's draft finishes loading is dropped. The field shows the edit and the status says "Saved", but nothing is written. The cause is `markScreenshotDirty` in `src/renderer/app/useProjectPersistence.ts`, which returns early when no draft exists. It reproduces in a focused hook test, and it is the cause of the intermittent source-context walkthrough failure. If the image load fails, every inspector edit is dropped the same way. The fix must keep the pending patch, apply it when the draft loads, and show an error instead of "Saved" if loading fails. It needs an independent review and Windows native evidence.
 - **Intermittent CI failures:**
   - The installer-lifecycle rollback test sometimes exits silently on Windows. It appeared after the script tests began running in parallel.
