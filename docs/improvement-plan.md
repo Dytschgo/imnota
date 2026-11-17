@@ -257,7 +257,7 @@ Follow-ups found during delivery:
 - **Intermittent CI failures:**
   - The installer-lifecycle rollback test sometimes exits silently on Windows. It appeared after the script tests began running in parallel.
   - On macOS, the `native-fault-smoke` "watch revision" unit test sometimes times out. Suspected cause: fs.watch start-up latency.
-  - The screenshot-comparison walkthrough sometimes focuses its zoom control before the control has rendered. A save advances `projectRevision` and remounts the comparison images; the saved status does not establish image/control readiness. The follow-up waits for both new zoom controls and decoded images after each save, then observes the Done dialog dismissal. Windows native verification and independent review are pending.
+  - The screenshot-comparison walkthrough sometimes focuses its zoom control before the control has rendered. A save advances `projectRevision` and remounts the comparison images; the saved status does not establish image/control readiness. The follow-up waits for both new zoom controls and decoded images after each save, then observes the Done dialog dismissal. On Windows, `corepack pnpm build` and the full `corepack pnpm smoke` passed all 38 assertion groups on the comparison-fix implementation; independent review found no standards/spec issues. Packaged CI remains pending.
 - **Evidence check:** the downloaded fault-evidence manifest check confirms file integrity but not completeness. This predates the plan; the fault launcher itself still fails closed.
 
 ## Execution and completion
