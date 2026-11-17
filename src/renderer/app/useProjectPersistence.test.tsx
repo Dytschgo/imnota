@@ -112,6 +112,137 @@ beforeEach(() => {
 });
 
 describe('useProjectPersistence', () => {
+  it.each([
+    { description: 'Early edit' },
+    { description: 'Original' },
+    { priority: 'high' as const },
+    { includeInExport: false },
+    { source: undefined },
+  ])('saves a pending inspector patch %j over loaded content', async (patch) => {
+    const source = snapshot();
+    source.project.screenshots[0]!.source = {
+      via: 'import',
+      capturedAt: '2026-01-01',
+    };
+    let resolve!: (value: Awaited<ReturnType<typeof originalLoad>>) => void;
+    const mock = bridge();
+    const originalLoad = mock.value.loadScreenshotContent;
+    const loaded = await originalLoad({
+      screenshot: { ...source.project.screenshots[0]!, description: 'On disk' },
+    });
+    mock.value.loadScreenshotContent = vi.fn(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    window.imnota = mock.value as never;
+    const hook = renderHook(() =>
+      useProjectPersistence({
+        snapshot: source,
+        activeScreenshot: source.project.screenshots[0]!,
+        onProject: vi.fn(),
+        onSnapshot: vi.fn(),
+        onSelectScreenshot: vi.fn(),
+      }),
+    );
+    if ('description' in patch) {
+      act(() =>
+        hook.result.current.markScreenshotDirty({
+          ...source.project.screenshots[0]!,
+          description: 'First edit',
+        }),
+      );
+    }
+    act(() => hook.result.current.markScreenshotDirty({ ...source.project.screenshots[0]!, ...patch }));
+    expect(hook.result.current.hasUnsavedChanges).toBe(true);
+    expect(hook.result.current.saveState).toBe('saving');
+    await act(async () => expect(await hook.result.current.flush()).toBe(false));
+    await act(async () => resolve(loaded));
+    await act(async () => expect(await hook.result.current.flush()).toBe(true));
+    expect(mock.value.saveScreenshotContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        screenshot: expect.objectContaining({ description: 'On disk', ...patch }),
+      }),
+    );
+    expect(hook.result.current.hasUnsavedChanges).toBe(false);
+  });
+
+  it('keeps pending edits across selection changes and ignores the abandoned load', async () => {
+    const source = snapshot([shot('one'), shot('two')]);
+    const mock = bridge();
+    const load = mock.value.loadScreenshotContent;
+    const resolvers: Array<() => Promise<void>> = [];
+    mock.value.loadScreenshotContent = vi.fn(
+      ({ screenshot }) =>
+        new Promise((resolve) => {
+          resolvers.push(async () => resolve(await load({ screenshot })));
+        }),
+    );
+    window.imnota = mock.value as never;
+    const hook = renderHook(
+      ({ index }) =>
+        useProjectPersistence({
+          snapshot: source,
+          activeScreenshot: source.project.screenshots[index]!,
+          onProject: vi.fn(),
+          onSnapshot: vi.fn(),
+          onSelectScreenshot: vi.fn(),
+        }),
+      { initialProps: { index: 0 } },
+    );
+    act(() =>
+      hook.result.current.markScreenshotDirty({ ...source.project.screenshots[0]!, description: 'Retained' }),
+    );
+    hook.rerender({ index: 1 });
+    await act(async () => resolvers[0]!());
+    expect(hook.result.current.loadedScreenshotId).toBe(null);
+    expect(hook.result.current.hasUnsavedChanges).toBe(true);
+    hook.rerender({ index: 0 });
+    await act(async () => resolvers[2]!());
+    await act(async () => expect(await hook.result.current.flushProjectDrafts()).toBe(true));
+    expect(mock.value.saveScreenshotContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        screenshot: expect.objectContaining({ id: 'one', description: 'Retained' }),
+      }),
+    );
+  });
+
+  it('retains edits after a rejected load and saves them after retry', async () => {
+    const source = snapshot();
+    const mock = bridge();
+    const load = mock.value.loadScreenshotContent;
+    mock.value.loadScreenshotContent = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Image unreadable'))
+      .mockImplementation(load);
+    window.imnota = mock.value as never;
+    const hook = renderHook(() =>
+      useProjectPersistence({
+        snapshot: source,
+        activeScreenshot: source.project.screenshots[0]!,
+        onProject: vi.fn(),
+        onSnapshot: vi.fn(),
+        onSelectScreenshot: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(hook.result.current.imageLoadFailed).toBe(true));
+    act(() =>
+      hook.result.current.markScreenshotDirty({ ...source.project.screenshots[0]!, description: 'Keep me' }),
+    );
+    expect(hook.result.current.hasUnsavedChanges).toBe(true);
+    expect(hook.result.current.saveState).toBe('error');
+    await act(async () => expect(await hook.result.current.flushProjectDrafts()).toBe(false));
+    act(() => hook.result.current.retryImageLoad());
+    await waitFor(() => expect(hook.result.current.loadedScreenshotId).toBe('one'));
+    await act(async () => expect(await hook.result.current.flush()).toBe(true));
+    expect(mock.value.saveScreenshotContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        screenshot: expect.objectContaining({ description: 'Keep me' }),
+      }),
+    );
+  });
+
   it('keeps unsaved edits and the accepted baseline when Quick Add asks the open project to reload', async () => {
     const source = snapshot();
     const mock = bridge();
