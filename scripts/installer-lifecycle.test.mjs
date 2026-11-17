@@ -120,7 +120,7 @@ fi
     });
   }
 
-  for (const mode of [
+  for (const { mode, pidOverlap } of [
     'graceful',
     'term',
     'helper',
@@ -129,8 +129,13 @@ fi
     'reused-before-term',
     'ps-failure',
     'pid-ps-failure',
-  ]) {
-    test(`${name}: rollback quiesces only owned replacement processes (${mode})`, () => {
+  ].flatMap((mode) =>
+    (['graceful', 'term'].includes(mode) ? [false, true] : [false]).map((pidOverlap) => ({
+      mode,
+      pidOverlap,
+    })),
+  )) {
+    test(`${name}: rollback quiesces only owned replacement processes (${mode}${pidOverlap ? ', overlapping PID digits' : ''})`, () => {
       const result = run(
         source,
         `
@@ -149,6 +154,9 @@ chmod +x "$app_path/Contents/MacOS/Imnota"
 rollback_path="$backup_path"; rollback_owned=1
 replacement_started=1; replacement_launched=1
 mode=${mode}; alive=1
+# Every ps/kill operation below is mocked. Exercise a distinct synthetic PID
+# containing the real shell PID digits, so substring-based self checks collide.
+owned_pid=${pidOverlap ? '"$$0"' : '200'}
 executable_path="$app_path/Contents/MacOS/Imnota"
 if [[ "$mode" == helper ]]; then
   executable_path="$app_path/Contents/Frameworks/Imnota Helper.app/Contents/MacOS/Imnota Helper"
@@ -157,9 +165,9 @@ if [[ "$mode" == helper ]]; then
 fi
 /bin/ps() {
   [[ "$mode" != ps-failure ]] || return 127
-  if [[ "$*" == *"$$"* ]]; then printf shell; return 0; fi
+  if [[ "$*" == "-ww -o comm= -p $$" ]]; then printf shell; return 0; fi
   if [[ "$*" == *-axo* ]]; then
-    if [[ "$alive" == 1 ]]; then printf '200 %s\\n' "$executable_path"; fi
+    if [[ "$alive" == 1 ]]; then printf '%s %s\\n' "$owned_pid" "$executable_path"; fi
     printf '201 /other/Imnota.app/Contents/MacOS/Imnota\\n'
   elif [[ "$*" == *'stat=,comm='* ]]; then
     [[ "$mode" != pid-ps-failure ]] || return 2
@@ -171,7 +179,7 @@ fi
       printf 'S %s' "$executable_path"
     fi
   elif [[ "$*" == *'stat='* ]]; then printf S
-  elif [[ "$*" == *'200'* && "$alive" == 1 ]]; then
+  elif [[ "$*" == *"$owned_pid"* && "$alive" == 1 ]]; then
     [[ "$mode" != pid-ps-failure ]] || return 2
     if [[ "$mode" == changed-owner && "$SECONDS" -ge 5 ]] ||
       [[ "$mode" == reused-before-term && -f "$root/last-check" ]]; then
@@ -186,7 +194,7 @@ fi
 bounded_quit_request() { printf quit >> "$root/signals"; if [[ "$mode" == graceful ]]; then alive=0; fi; return 0; }
 /bin/sleep() { SECONDS=$((SECONDS + $1)); }
 kill() {
-  [[ "$*" == '-TERM 200' ]] || { printf 'Unowned signal: %s\\n' "$*" >&2; return 1; }
+  [[ "$*" == "-TERM $owned_pid" ]] || { printf 'Unowned signal: %s\\n' "$*" >&2; return 1; }
   printf term >> "$root/signals"
   [[ "$mode" == unstoppable ]] || alive=0
 }
