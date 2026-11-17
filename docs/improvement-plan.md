@@ -249,7 +249,8 @@ Deferred, each with its own gate:
 - Apple Silicon-only packaging, part 2: only after a bridge release (#328) has been published and confirmed (see [release readiness](release-readiness.md)).
 - Thumbnails outside the snapshot (Phase 3, item 5): needs a short design first.
 - Recovery helper unification (Phase 4, item 5): waits for approval of the [recovery unification design](recovery-unification-design.md).
-- WebP/AVIF artwork conversion (Phase 3, item 6) and keeping `marked` and DOMPurify out of the startup bundle: not started.
+- WebP artwork conversion, under verification: eight backdrops and the three large 0.4.0 What's New illustrations use lossless WebP; smaller screenshots remain PNGs. Asset bytes fall from 17,372,801 to 12,693,530 (4,679,271 bytes, 26.9%). Both artwork documents retain original provenance and add source/derived SHA-256 pairs, dimensions and encoder settings. Pillow and the application's Electron 45.3.2 / Chromium 156 decoder both produce identical RGBA pixels for all 11 source/derived pairs; independent review confirmed the pixels, hashes and references with no findings. Windows lint/typecheck, 18 focused tests and the full suite passed (2,901 application and 345 script tests; 7 and 21 skipped). Both clean Windows builds and native walkthroughs passed (39 assertion groups). Same-machine comparison against main passed 13/14 approved captures, including both backdrop views; four generic-backdrop settings captures are byte-identical. The remaining onboarding-intro mismatch is a roughly one-pixel content shift in an unchanged screen. Local comparison against committed CI baselines fails 8/14 captures on main and 9/14 on this branch, including that additional onboarding mismatch. The unchanged CI visual baseline gate remains required before merge; no baseline update is authorized.
+- Keeping `marked` and DOMPurify out of the startup bundle: not started.
 
 Follow-ups found during delivery:
 

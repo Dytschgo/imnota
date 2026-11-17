@@ -201,7 +201,7 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
       {
         id: 'capture-timing',
         title: 'Capture without Imnota in the way',
-        imageSrc: new URL('../renderer/assets/whats-new-040-capture.png', import.meta.url).href,
+        imageSrc: new URL('../renderer/assets/whats-new-040-capture.webp', import.meta.url).href,
         description:
           'Choose Now, 3 s or 5 s before capturing. On macOS, Imnota hides first and Window mode is available. Screen Recording permission is still required.',
         action: { kind: 'settings', category: 'Shortcuts' },
@@ -209,7 +209,7 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
       {
         id: 'copy-files',
         title: 'Copy a bundle as files',
-        imageSrc: new URL('../renderer/assets/whats-new-040-files.png', import.meta.url).href,
+        imageSrc: new URL('../renderer/assets/whats-new-040-files.webp', import.meta.url).href,
         description:
           'Copy files is now the macOS default too. It puts Markdown and PNG files on the clipboard. Receiving apps choose what to accept; separate copy options remain available.',
         action: { kind: 'onboarding' },
@@ -217,7 +217,7 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
       {
         id: 'simpler',
         title: 'A simpler workspace',
-        imageSrc: new URL('../renderer/assets/whats-new-040-workspace.png', import.meta.url).href,
+        imageSrc: new URL('../renderer/assets/whats-new-040-workspace.webp', import.meta.url).href,
         description:
           'Glass is a single switch, Favourites and Archived live in the Library, and rarely used tools and duplicate settings are gone.',
       },

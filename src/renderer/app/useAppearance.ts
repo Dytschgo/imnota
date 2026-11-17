@@ -119,7 +119,7 @@ function mediaMatches(query: string): boolean {
 
 export function backdropPresetUrl(preset: BackdropPreset): string {
   const base = (import.meta as ImportMeta & { env?: { BASE_URL?: string } }).env?.BASE_URL || './';
-  const path = `${base.endsWith('/') ? base : `${base}/`}backdrops/${preset}.png`;
+  const path = `${base.endsWith('/') ? base : `${base}/`}backdrops/${preset}.webp`;
   return typeof document === 'undefined' ? path : new URL(path, document.baseURI).href;
 }
 

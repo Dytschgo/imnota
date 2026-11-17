@@ -40,7 +40,7 @@ describe('useAppearance', () => {
   });
 
   it('resolves only local uploaded data and allowlisted bundled backdrops', () => {
-    expect(cssBackgroundImage('preset:emerald')).toMatch(/^url\("https?:\/\/.*backdrops\/emerald\.png"\)$/);
+    expect(cssBackgroundImage('preset:emerald')).toMatch(/^url\("https?:\/\/.*backdrops\/emerald\.webp"\)$/);
     expect(cssBackgroundImage('https://example.com/backdrop.png')).toBe('none');
     expect(cssBackgroundImage('data:image/png;base64,AA==')).toContain('data:image/png;base64,AA==');
   });

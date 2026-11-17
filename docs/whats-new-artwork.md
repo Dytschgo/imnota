@@ -31,3 +31,31 @@ agent-handoff  bde003c6e4a4725ff93ece3770abf071abbe3a0f60d5d2c47d5a312d2fc556a8
 ```
 
 The screenshot version records their source, not a claim that the next nightly has been published. The new nightly catalog entry is gated after 0.4.0 and does not replace Stable or older-nightly guidance. Verify the final nightly's actual version, installed-channel label, three loaded images, navigation, replay and related actions against that published candidate. A controlled local preview is separate evidence from publication. Screenshots do not establish acceptance by an external coding agent or clipboard receiver.
+
+## Lossless WebP derivation - 17 November 2026
+
+The bundled large PNGs documented above were encoded from repository revision `72b0945559e9ec1c55648d17a09fd288de96ac1f` with Pillow 12.3.0 / libwebp 1.6.0 using `lossless=True, exact=True, method=6`. The shipped filenames now use `.webp`; the PNG names above record the original sources, which remain in Git history. This is a format conversion with no crop, resize, palette change or generated content. Every decoded RGBA pixel matches its PNG source exactly. These source files have no ICC, gamma, EXIF or other metadata to transfer.
+
+| Asset stem                | Pixels     | Original PNG bytes | WebP bytes |
+| ------------------------- | ---------- | -----------------: | ---------: |
+| `whats-new-040-capture`   | 1586 x 992 |          1,428,634 |  1,013,272 |
+| `whats-new-040-files`     | 1586 x 992 |          1,492,345 |  1,036,590 |
+| `whats-new-040-workspace` | 1586 x 992 |          1,761,505 |  1,242,880 |
+
+SHA-256 pairs (original PNG, then derived WebP):
+
+```text
+whats-new-040-capture
+  PNG   aa597229f1e91eb9a2fb8ffab68ad4ee88f4878947fac038af9a2189ae6648e3
+  WebP  d2c927d0e26fa5a0e816ce7dbaaf56b5ba59f85372186b68305083b294cca5ce
+whats-new-040-files
+  PNG   514038d83dea3fc6b2458a8014244d89fddeb884d4229d9e0060a255be6be7cb
+  WebP  9ef5797356fda048f8232bf4afd4e9b47643778c7337499f445b1af63c2c3b28
+whats-new-040-workspace
+  PNG   79d09df88ff45bd1352b7c0fd1bebb87395e5e99c0d0de758105454f6eba80db
+  WebP  a8cdb040f6ca5af2586f90ee7c85ec68b0e00fd7636353624083d8ff277bed57
+```
+
+Windows Electron 45.3.2 / Chromium 156 canvas decoding also compared all 11 source/derived pairs with zero differing RGBA channels. Clean main and conversion builds both passed the native walkthrough (39 assertion groups). The same-machine visual comparison passed 13/14 approved capture names, including both backdrop views; the unmatched onboarding intro shifts unchanged content by roughly one pixel. Four supplementary generic-backdrop settings captures are byte-identical. Main itself fails 8/14 committed CI baselines locally; the conversion fails 9/14 including onboarding. Required CI must pass those existing approved baselines before merge. No baseline images or tolerances are updated by this conversion.
+
+The smaller historical UI captures and 0.5.0 screenshots remain PNGs with their existing provenance. Only the three large 0.4.0 illustrations are converted here.
