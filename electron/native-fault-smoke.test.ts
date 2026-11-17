@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import { watch } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { setImmediate } from 'node:timers/promises';
 import { runInNewContext } from 'node:vm';
 import type { BrowserWindow } from 'electron';
 import { expect, it, vi } from 'vitest';
@@ -118,16 +119,18 @@ it.each([null, 'old-revision'])(
       // An early completion means the edit escaped before monitoring existed.
       await Promise.race([firstObservation, edit]);
       expect(await fs.readFile(target, 'utf8')).toBe(original);
-      let changed!: () => void;
-      const notification = new Promise<void>((resolve) => {
-        changed = resolve;
+      const notification = new Promise<void>((resolve, reject) => {
+        // Observe this in-place file edit, not directory membership. macOS uses
+        // kqueue for files instead of the asynchronously started FSEvents stream.
+        watcher = watch(target, () => resolve());
+        watcher.once('error', reject);
       });
-      watcher = watch(root, (_event, filename) => {
-        if (filename?.toString() === 'description.md') changed();
-      });
-      release(observation('ready-revision'));
-      const result = await edit;
-      await notification;
+      // Watch creation can follow a filesystem completion partway through poll.
+      // Cross two check phases so a new poll installs the kqueue registration.
+      const releaseAfterPoll = setImmediate()
+        .then(() => setImmediate())
+        .then(() => release(observation('ready-revision')));
+      const [result] = await Promise.all([edit, notification, releaseAfterPoll]);
       expect(await fs.readFile(target, 'utf8')).toBe('fixture-ext-shot');
       expect(result.next.length).toBe(result.prior.length);
       expect((await fs.stat(target)).mtimeMs).toBeCloseTo(result.priorStat.mtimeMs, 0);
