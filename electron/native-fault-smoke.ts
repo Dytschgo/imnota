@@ -250,7 +250,9 @@ export async function editExternalFaultMember(
   );
   const start = controller.caseEvents.length;
   await fs.writeFile(externalPath, next);
-  await fs.utimes(externalPath, priorStat.atime, priorStat.mtime);
+  // Date-valued stats round away fractional milliseconds. Restore numeric
+  // seconds so the same-size external edit also preserves precise metadata.
+  await fs.utimes(externalPath, priorStat.atimeMs / 1000, priorStat.mtimeMs / 1000);
   return { prior, priorStat, next, start };
 }
 
