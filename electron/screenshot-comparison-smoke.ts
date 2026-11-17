@@ -38,6 +38,18 @@ export async function exerciseScreenshotComparison(
       for (let step = 0; step < index; step++) await driver.press('Down');
     }
   };
+  const waitForImages = async (left: string, right: string) => {
+    // Saving advances projectRevision and remounts ComparisonImages. Save status
+    // confirms metadata only; wait for the new controls and decoded images before
+    // using their coordinates or capturing the dialog.
+    for (const label of [left, right]) {
+      await driver.waitFor({ selector: `input[aria-label="${label} zoom"]` });
+      await driver.waitFor({ selector: `img[alt="${label} annotated screenshot"]` });
+    }
+    await driver.evaluate(
+      `Promise.all(Array.from(document.querySelectorAll('.comparison-viewport img')).map((image)=>image.decode()))`,
+    );
+  };
   await driver.click({ selector: '[data-testid="compare-screenshots"]' });
   await driver.waitFor({ selector: '[role="dialog"]', text: 'Compare screenshots' });
   // Select existing screenshots; macOS uses the documented popup setup above.
@@ -53,6 +65,7 @@ export async function exerciseScreenshotComparison(
   );
   await driver.click({ selector: 'button', text: 'Save comparison', exact: true });
   await driver.waitFor({ selector: '[role="status"]', text: 'Comparison saved.', exact: false });
+  await waitForImages('Current', 'Expected');
   const saved = await host.readProject(projectPath);
   const expected = { kind: 'current-expected', leftId: shots[0].id, rightId: shots[1].id };
   if (
@@ -65,6 +78,7 @@ export async function exerciseScreenshotComparison(
   if (artifactDirectory)
     captures.push(await driver.capture(artifactDirectory, 'comparison-current-expected.png', 'none'));
   await driver.click({ selector: 'button', text: 'Done', exact: true });
+  await driver.waitFor({ selector: '[role="dialog"]' }, { absent: true });
   await driver.click({ selector: '[data-testid="share-prompt-bundles"]' });
   await driver.waitFor({
     selector: '[data-testid="prompt-sharing-dialog"][aria-busy="false"] [data-testid="copy-bundle-1"]',
@@ -115,6 +129,7 @@ export async function exerciseScreenshotComparison(
   await driver.waitFor({ selector: 'img[alt="After annotated screenshot"]' });
   await driver.click({ selector: 'button', text: 'Save comparison', exact: true });
   await driver.waitFor({ selector: '[role="status"]', text: 'Comparison saved.', exact: false });
+  await waitForImages('Before', 'After');
   if (
     (await host.readProject(projectPath)).collections.find((entry) => entry.id === collection.id)?.comparison
       ?.kind !== 'before-after'
@@ -146,6 +161,7 @@ export async function exerciseScreenshotComparison(
   );
   await driver.click({ selector: 'button', text: 'Save comparison', exact: true });
   await driver.waitFor({ selector: '[role="status"]', text: 'Comparison saved.', exact: false });
+  await waitForImages('Before', 'After');
   const ready = await host.readProject(projectPath);
   const readyPair = ready.collections.find((entry) => entry.id === collection.id)?.comparison;
   if (readyPair?.leftId !== shots[1].id || readyPair.rightId !== shots[4].id)
