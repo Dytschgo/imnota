@@ -90,6 +90,9 @@ it.each([null, 'old-revision'])(
     const target = path.join(root, 'description.md');
     const original = 'fixture-own-shot';
     await fs.writeFile(target, original);
+    // Make Date's loss of fractional milliseconds observable on every run.
+    const fixtureTime = 1_700_000_000.00075;
+    await fs.utimes(target, fixtureTime, fixtureTime);
     let release!: (value: FaultObservation) => void;
     const pendingWatch = new Promise<FaultObservation>((resolve) => {
       release = resolve;
@@ -133,7 +136,8 @@ it.each([null, 'old-revision'])(
       const [result] = await Promise.all([edit, notification, releaseAfterPoll]);
       expect(await fs.readFile(target, 'utf8')).toBe('fixture-ext-shot');
       expect(result.next.length).toBe(result.prior.length);
-      expect((await fs.stat(target)).mtimeMs).toBeCloseTo(result.priorStat.mtimeMs, 0);
+      // Numeric utimes preserves sub-millisecond metadata within native precision.
+      expect((await fs.stat(target)).mtimeMs).toBeCloseTo(result.priorStat.mtimeMs, 2);
     } finally {
       release(observation('ready-revision'));
       await edit.catch(() => undefined);
