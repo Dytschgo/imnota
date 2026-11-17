@@ -382,8 +382,12 @@ describe('feedback controls', () => {
     await renderEditingProject({ loadScreenshotContent });
     loadScreenshotContent.mockRejectedValue(new Error('IPC rejected D:/private/screenshot.png'));
     fireEvent.click(screen.getByTestId('share-prompt-bundles'));
-    const dialog = await screen.findByRole('dialog', { name: 'Share bundles' });
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Rebuild bundles');
+    // The eager loading shell is replaced when the dialog chunk resolves. Observe
+    // the error from the document, then assert its owner in the current dialog.
+    const alert = await screen.findByRole('alert');
+    const dialog = screen.getByRole('dialog', { name: 'Share bundles' });
+    expect(within(dialog).getByRole('alert')).toBe(alert);
+    expect(alert).toHaveTextContent('Rebuild bundles');
     expect(screen.queryByTestId('error-toast')).not.toBeInTheDocument();
     expect(screen.getAllByRole('alert')).toHaveLength(1);
     expect(within(dialog).getByRole('button', { name: 'Rebuild bundles' })).toBeEnabled();
