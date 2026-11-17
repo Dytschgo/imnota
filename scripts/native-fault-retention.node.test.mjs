@@ -12,10 +12,10 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { runWalkthroughChild } from './walkthrough-child.mjs';
 import { logFaultLifecycle } from './native-fault-lifecycle.mjs';
-import { faultCases } from './native-fault-catalog.mjs';
+import { faultCaseSets, faultCases, faultCaseErrno } from './native-fault-catalog.mjs';
 import {
   retainFaultOperands,
   writeFaultEvidenceManifest,
@@ -50,6 +50,60 @@ function fixture() {
   writeFileSync(join(fixtureRoot, 'undo-after.bin'), 'exact synthetic candidate');
   return { proof, fixtureRoot };
 }
+function completeEvidence(root) {
+  const version = '0.5.0';
+  for (const caseSet of faultCaseSets) {
+    const group = join(root, `imnota-verification-artifacts-${caseSet}`);
+    const retained = join(group, 'retained-run');
+    mkdirSync(retained, { recursive: true });
+    const proof = { caseSet, version, nonce: randomUUID() };
+    writeFileSync(join(retained, '.imnota-native-fault-owned.json'), JSON.stringify(proof));
+    const cases = faultCases(caseSet).map((caseId) => {
+      const evidence = JSON.stringify({
+        caseSet,
+        caseId,
+        passed: true,
+        disarmed: true,
+        events: ['armed', 'injected', 'disarmed'].map((event) => ({
+          event,
+          caseId,
+          errno: faultCaseErrno(caseSet, caseId),
+        })),
+      });
+      mkdirSync(join(group, caseId));
+      writeFileSync(join(group, caseId, 'case.json'), evidence);
+      return {
+        caseId,
+        passed: true,
+        disarmed: true,
+        sha256: createHash('sha256').update(evidence).digest('hex'),
+      };
+    });
+    writeFileSync(
+      join(retained, 'result.json'),
+      JSON.stringify({
+        passed: true,
+        mode: 'faults',
+        version,
+        faults: { caseSet, nonce: proof.nonce, disarmed: true, cases },
+      }),
+    );
+  }
+  writeFileSync(
+    join(root, 'aggregate.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      version,
+      passed: true,
+      expected: faultCaseSets,
+      results: faultCaseSets.map((caseSet) => ({ caseSet, passed: true })),
+    }),
+  );
+}
+function rewriteJson(file, update) {
+  writeFileSync(file, JSON.stringify(update(JSON.parse(readFileSync(file, 'utf8')))));
+}
+
 it('retains original operands and captures them even when result and screenshot are missing', () => {
   const { proof, fixtureRoot } = fixture();
   retainFaultOperands(proof, { code: 1, pid: 123, signal: null });
@@ -116,13 +170,14 @@ it('retains the early receipt and pending profile after a timed-out child actual
 
 it('detects hidden journal loss, byte changes and extra files after evidence transport', () => {
   const { proof } = fixture();
+  completeEvidence(proof.artifactRoot);
   const journal = join(proof.artifactRoot, '.imnota-undo');
   mkdirSync(journal);
   const member = join(journal, 'undo-before.bin');
   writeFileSync(member, 'foreign exact bytes');
   writeFileSync(join(proof.artifactRoot, '.ownership'), 'nonce');
   writeFaultEvidenceManifest(proof.artifactRoot);
-  assert.equal(verifyFaultEvidenceManifest(proof.artifactRoot), 2);
+  assert.ok(verifyFaultEvidenceManifest(proof.artifactRoot) > 2);
   writeFileSync(member, 'changed exact bytes');
   assert.throws(() => verifyFaultEvidenceManifest(proof.artifactRoot), /manifest/);
   writeFileSync(member, 'foreign exact bytes');
@@ -132,6 +187,125 @@ it('detects hidden journal loss, byte changes and extra files after evidence tra
   rmSync(member);
   assert.throws(() => verifyFaultEvidenceManifest(proof.artifactRoot), /manifest/);
 });
+
+const firstSet = faultCaseSets[0];
+const firstGroup = (root) => join(root, `imnota-verification-artifacts-${firstSet}`);
+const changeAggregate = (root, update) => rewriteJson(join(root, 'aggregate.json'), update);
+const changeReport = (root, update) =>
+  rewriteJson(join(firstGroup(root), 'retained-run', 'result.json'), update);
+for (const [label, corrupt] of [
+  ['missing aggregate', (root) => rmSync(join(root, 'aggregate.json'))],
+  ['unfinished run', (root) => changeAggregate(root, (value) => ({ ...value, passed: false }))],
+  [
+    'missing set',
+    (root) => changeAggregate(root, (value) => ({ ...value, results: value.results.slice(1) })),
+  ],
+  [
+    'duplicated set',
+    (root) => changeAggregate(root, (value) => ({ ...value, results: [...value.results, value.results[0]] })),
+  ],
+  [
+    'failed set',
+    (root) =>
+      changeAggregate(root, (value) => ({
+        ...value,
+        results: value.results.map((entry, index) => (index ? entry : { ...entry, passed: false })),
+      })),
+  ],
+  [
+    'retired catalog',
+    (root) =>
+      changeAggregate(root, (value) => ({ ...value, expected: ['restore-eio', ...value.expected.slice(1)] })),
+  ],
+  [
+    'retired result',
+    (root) =>
+      changeAggregate(root, (value) => ({
+        ...value,
+        results: [{ caseSet: 'restore-eio', passed: true }, ...value.results.slice(1)],
+      })),
+  ],
+  ['missing set directory', (root) => rmSync(firstGroup(root), { recursive: true })],
+  ['retired set directory', (root) => mkdirSync(join(root, 'imnota-verification-artifacts-restore-eio'))],
+  ['failed set report', (root) => changeReport(root, (value) => ({ ...value, passed: false }))],
+  [
+    'duplicated report cases',
+    (root) =>
+      changeReport(root, (value) => ({
+        ...value,
+        faults: { ...value.faults, cases: [...value.faults.cases, value.faults.cases[0]] },
+      })),
+  ],
+  [
+    'failed report case',
+    (root) =>
+      changeReport(root, (value) => ({
+        ...value,
+        faults: {
+          ...value.faults,
+          cases: value.faults.cases.map((entry, index) => (index ? entry : { ...entry, passed: false })),
+        },
+      })),
+  ],
+  [
+    'mismatched run version',
+    (root) => changeAggregate(root, (value) => ({ ...value, version: 'foreign-version' })),
+  ],
+  [
+    'mismatched set proof',
+    (root) =>
+      rewriteJson(join(firstGroup(root), 'retained-run', '.imnota-native-fault-owned.json'), (value) => ({
+        ...value,
+        caseSet: faultCaseSets[1],
+      })),
+  ],
+  [
+    'missing report case',
+    (root) =>
+      changeReport(root, (value) => ({
+        ...value,
+        faults: { ...value.faults, cases: value.faults.cases.slice(1) },
+      })),
+  ],
+  [
+    'case hash mismatch',
+    (root) =>
+      rewriteJson(join(firstGroup(root), faultCases(firstSet)[0], 'case.json'), (value) => ({
+        ...value,
+        passed: false,
+      })),
+  ],
+  [
+    'rehashed wrong fault errno',
+    (root) => {
+      const file = join(firstGroup(root), faultCases(firstSet)[0], 'case.json');
+      rewriteJson(file, (value) => ({
+        ...value,
+        events: value.events.map((event) =>
+          event.event === 'injected' ? { ...event, errno: 'EXDEV' } : event,
+        ),
+      }));
+      const sha256 = createHash('sha256').update(readFileSync(file)).digest('hex');
+      changeReport(root, (value) => ({
+        ...value,
+        faults: {
+          ...value.faults,
+          cases: value.faults.cases.map((entry, index) => (index ? entry : { ...entry, sha256 })),
+        },
+      }));
+    },
+  ],
+  ['missing case evidence', (root) => rmSync(join(firstGroup(root), faultCases(firstSet)[0], 'case.json'))],
+]) {
+  it(`rejects hash-valid downloaded evidence with ${label}`, () => {
+    const { proof } = fixture();
+    completeEvidence(proof.artifactRoot);
+    corrupt(proof.artifactRoot);
+    // Seal the already incomplete run: transport integrity alone must not pass it.
+    writeFaultEvidenceManifest(proof.artifactRoot);
+    assert.throws(() => verifyFaultEvidenceManifest(proof.artifactRoot));
+  });
+}
 
 it('surfaces candidate-bound case starts on failure and rejects forged or incomplete success logs', () => {
   const { proof } = fixture();

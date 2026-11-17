@@ -2,6 +2,12 @@ import { lstatSync, readdirSync, realpathSync, mkdirSync, readFileSync, writeFil
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
+import {
+  faultCaseSets,
+  assertFaultAggregate,
+  assertFaultReport,
+  assertFaultCaseEvidence,
+} from './native-fault-catalog.mjs';
 
 /** Called after the launcher's child exits. Never removes the original failed operands. */
 export function retainFaultOperands(proof, outcome) {
@@ -149,6 +155,45 @@ export function verifyFaultEvidenceManifest(root) {
     JSON.stringify(manifest.entries) !== JSON.stringify(actual)
   )
     throw new Error('Downloaded native fault evidence differs from its complete upload manifest.');
+  const aggregate = JSON.parse(readFileSync(join(root, 'aggregate.json'), 'utf8'));
+  if (
+    aggregate?.schemaVersion !== 1 ||
+    aggregate.passed !== true ||
+    typeof aggregate.version !== 'string' ||
+    !aggregate.version ||
+    !Array.isArray(aggregate.results) ||
+    JSON.stringify(aggregate.expected) !== JSON.stringify(faultCaseSets)
+  )
+    throw new Error('Downloaded native fault run is incomplete or uses a retired case catalog.');
+  assertFaultAggregate(aggregate.results);
+  const prefix = 'imnota-verification-artifacts-';
+  const directories = readdirSync(root)
+    .filter((name) => name.startsWith(prefix))
+    .map((name) => name.slice(prefix.length))
+    .sort();
+  if (JSON.stringify(directories) !== JSON.stringify([...faultCaseSets].sort()))
+    throw new Error('Downloaded native fault case-set directories are missing or retired.');
+  for (const caseSet of faultCaseSets) {
+    const artifacts = join(root, `${prefix}${caseSet}`);
+    const retained = join(artifacts, 'retained-run');
+    const proof = JSON.parse(readFileSync(join(retained, '.imnota-native-fault-owned.json'), 'utf8'));
+    if (
+      proof?.caseSet !== caseSet ||
+      proof.version !== aggregate.version ||
+      typeof proof.nonce !== 'string' ||
+      !proof.nonce
+    )
+      throw new Error('Downloaded native fault set binding is incomplete or mismatched.');
+    const report = JSON.parse(readFileSync(join(retained, 'result.json'), 'utf8'));
+    assertFaultReport(report, proof);
+    for (const resultCase of report.faults.cases) {
+      // The catalog assertion above fixes case IDs before they become paths.
+      const evidence = readFileSync(join(artifacts, resultCase.caseId, 'case.json'));
+      if (createHash('sha256').update(evidence).digest('hex') !== resultCase.sha256)
+        throw new Error('Downloaded native fault case evidence is missing or changed.');
+      assertFaultCaseEvidence(caseSet, resultCase.caseId, JSON.parse(evidence.toString('utf8')));
+    }
+  }
   console.log(`Verified native fault artifact manifest: ${actual.length} files, including hidden operands.`);
   return actual.length;
 }
