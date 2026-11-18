@@ -4,15 +4,16 @@
 
 - Keep optional quick-capture cards on Windows and macOS to annotate, copy, drag or add a capture to a chosen collection. Cards are off by default and last only for the running session; Linux continues to use Import or Paste.
 - Pair screenshots as Current / Expected or Before / After, with annotated previews and comparison roles in exported Markdown and PNG bundles.
-- Pin projects to a dedicated Pinned section in the sidebar.
+- Pin projects in the sidebar, duplicate a project from its Library row, and find archived collections in the Archived view.
 - Restore screenshots, drawings and text from Recently deleted after the Undo toast expires. Recovery keeps the original item files and reports incomplete or uncertain saves.
 - Draw constrained shapes and use keyboard editing on the annotation canvas. Search keeps revealing a matching annotation until it is drawn.
 - Hand off an exact saved bundle to a local agent, with optional Terminal or Cursor routes. Agents can discover and read saved bundles through the optional MCP connection; access remains off by default, and Imnota does not run a hosted model or confirm that a receiving agent accepted the handoff.
 - Optionally record and edit screenshot source info for exports. Recording is off by default; existing source records remain local unless explicitly shared.
-- Open the dedicated **Settings → What’s new** page. Nightly builds include illustrated capture, comparison and agent-handoff highlights, with replay and links to their settings.
+- Open **Settings → What’s new** to see illustrated highlights for quick capture, screenshot comparison and agent handoff, or replay the release dialog.
 - Bundle creation uses compact rows with progress and cancellation feedback. Export failures identify a recovery step and clear busy cards; Markdown-only copies can reuse a finalized bundle.
-- macOS bundle previews clear the window chrome and open at the available width. Updates from `/Applications` support the standard administrator-owned installation folder, and verified installations retire their temporary app rollback copies.
-- Terminal updates from `/Applications` require a complete native no-ACL check. Older installed nightlies keep their existing updater for the hop to this build; the new check governs updates from this build onward.
+- Larger hosted shares can be split into separate links. Review and confirm each link before uploading it.
+- On macOS, choose **Download update** and **Restart to install** from inside Imnota. An app you own in the standard administrator-owned `/Applications` folder can update when the folder passes the native permissions check. The updater retires its temporary rollback copy after verifying that the replacement launched. Older builds use their bundled updater for the first hop.
+- macOS bundle previews clear the window chrome and open at the available width.
 - Strengthened save flushing, journal preservation and rollback ownership checks. Failed imports and duplicate operations preserve files whose ownership cannot be established.
 - Improved editor loading and error feedback, keyboard shortcuts, sidebar navigation, and memory use during canvas editing.
 - Updated Electron, rendering, validation, sharing and build dependencies, including the security fixes reviewed for this candidate.

@@ -12,7 +12,7 @@ The prompt direction was a minimal landscape still life in matte paper and ceram
 
 These are decorative illustrations, not screenshots or proof of receiving-app behavior. Feature descriptions and actions remain accessible HTML. `WhatsNew.tsx` gives decorative images an empty alternative and keeps the text when an image fails to load. The release walkthrough captures the actual dialog and exercises its actions separately from the artwork.
 
-## Next nightly: capture, compare and hand off
+## 0.5 highlights: capture, compare and hand off
 
 The three `whats-new-050-*` PNGs are unedited screenshots of Imnota on Windows 11 x64, captured on 2026-11-14 with the existing isolated native walkthrough. Every project, screenshot, annotation, bundle identifier and instruction is synthetic. The selected images were inspected for personal data and contain no personal workspace paths. They are bundled locally; opening release notes makes no image-generation or screenshot-upload calls.
 
@@ -30,7 +30,7 @@ comparison     b8635a853119ce4e796446cc822ac7d38508ed173dc191d8a994398bf046de69
 agent-handoff  bde003c6e4a4725ff93ece3770abf071abbe3a0f60d5d2c47d5a312d2fc556a8
 ```
 
-The screenshot version records their source, not a claim that the next nightly has been published. The new nightly catalog entry is gated after 0.4.0 and does not replace Stable or older-nightly guidance. Verify the final nightly's actual version, installed-channel label, three loaded images, navigation, replay and related actions against that published candidate. A controlled local preview is separate evidence from publication. Screenshots do not establish acceptance by an external coding agent or clipboard receiver.
+The screenshot version records the build used to capture the artwork. Stable and Nightly builds newer than 0.4.0 share these highlights. The preview label follows the installed channel. Verify a release candidate's version, channel label, three loaded images, navigation, replay and actions in the packaged walkthrough. Use a receiving editor or coding agent to check handoff compatibility separately.
 
 ## Lossless WebP derivation - 17 November 2026
 
